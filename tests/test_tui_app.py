@@ -142,18 +142,12 @@ def test_ego_lines_shows_focal_and_its_edges():
     assert "Carnot 1824" in txt and "cites" in txt
 
 
-def test_ego_graph_is_a_fixed_canvas_with_focal_centred():
-    rows = tui_app._ego_graph(_ego(), width=21, height=9)
-    assert len(rows) == 9 and all(len(r) == 21 for r in rows)   # fixed rectangle
-    assert rows[4][10] == "◆"                                   # focal paper glyph dead centre
-    joined = "".join(rows)
-    assert ("⬡" in joined) or ("○" in joined)                   # neighbour glyphs present
-    assert any(ch in joined for ch in "─│╱╲")                   # connecting edges drawn
-
-
-def test_ego_graph_handles_no_edges():
-    rows = tui_app._ego_graph({"focal": {"key": "paper/p", "type": "paper"}, "edges": []}, width=21, height=9)
-    assert len(rows) == 9 and all(len(r) == 21 for r in rows)   # still a valid canvas, no crash
+def test_ego_lines_has_a_trunk_and_labelled_branches():
+    lines = tui_app._ego_lines(_ego(), tui.Style(False), width=40)
+    joined = "\n".join(lines)
+    assert "│" in joined                                        # a visible trunk from the focal node
+    assert any(b in joined for b in ("├──", "└──"))             # labelled branches
+    assert "Thermodynamics" in joined and "Carnot 1824" in joined   # neighbours are named, not dots
 
 
 def test_ego_lines_empty_prompts_to_link():

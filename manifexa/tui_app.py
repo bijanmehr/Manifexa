@@ -16,7 +16,6 @@ installed (or there's no real terminal), ``run()`` falls back to ``tui.repl``.
 """
 from __future__ import annotations
 
-import math
 import sys
 import time
 from pathlib import Path
@@ -116,66 +115,36 @@ def _clip(s, n):
     return s if len(s) <= n else s[: max(1, n - 1)] + "…"
 
 
-def _ego_graph(ego, width=32, height=11):
-    """A compact radial node-link diagram: the focal node at the centre, its
-    neighbours placed around it, with lines connecting them. Returns plain canvas
-    rows (the caller tints them) — an actual little graph, not a list."""
-    grid = [[" "] * width for _ in range(height)]
-
-    def put(x, y, ch):
-        if 0 <= y < height and 0 <= x < width:
-            grid[y][x] = ch
-
-    cx, cy = width // 2, height // 2
-    edges = (ego.get("edges") or [])[:8]
-    n = len(edges)
-    rx, ry = width // 2 - 2, height // 2 - 1
-    pts = []
-    for i, ed in enumerate(edges):
-        ang = (2 * math.pi * i / n) - math.pi / 2 if n else 0.0
-        pts.append((int(round(cx + math.cos(ang) * rx)),
-                    int(round(cy + math.sin(ang) * ry)), ed))
-    for x, y, _ed in pts:                                    # edges first, nodes sit on top
-        dx, dy = x - cx, y - cy
-        steps = max(abs(dx), abs(dy))
-        if not steps:
-            continue
-        ch = "─" if abs(dy) * 2 <= abs(dx) else "│" if abs(dx) * 2 <= abs(dy) else \
-            ("╲" if (dx > 0) == (dy > 0) else "╱")
-        for s in range(1, steps):
-            put(int(round(cx + dx * s / steps)), int(round(cy + dy * s / steps)), ch)
-    for x, y, ed in pts:
-        put(x, y, tui._dotfor(ed.get("node") or {}))
-    put(cx, cy, tui._dotfor(ego.get("focal") or {}))
-    return ["".join(r) for r in grid]
-
-
-def _ego_lines(ego, st, width=28):
-    """Render the focal node + its direct edges as a compact connection tree —
-    the sidebar's live 'what connects to what' graph view. Type-coloured node
-    glyphs, dimmed relation labels, focal node in the accent colour. The graph is
-    undirected: an edge shows whether the focal node is its source or target."""
+def _ego_lines(ego, st, width=36):
+    """The sidebar graph view: the focal node with a visible trunk down to each
+    connected node, every branch labelled with its neighbour's name + the
+    relation. Reads as a graph (root → edges → nodes) but stays legible — no
+    unlabelled dots. Undirected: a branch shows whatever the focal connects to."""
     a, dim = st.a, st.dim
     if not ego or not ego.get("focal"):
-        return ["  " + dim("no edges yet —"), "  " + dim("link two entities")]
+        return ["  " + dim("no links yet — connect two"),
+                "  " + dim("entities:  link <a> <b>")]
     focal = ego["focal"]
     ftitle = (focal.get("title") or focal.get("key") or "").split("/")[-1]
-    deg = ego.get("degree", len(ego.get("edges", [])))
-    out = ["  " + tui._dotfor(focal) + " " + a(_clip(ftitle, width - 6)) + " " + dim("·" + str(deg))]
     edges = ego.get("edges", [])
+    out = ["  " + tui._dotfor(focal) + " " + a(_clip(ftitle, width - 4))]
     if not edges:
-        out.append("     " + dim("(no direct links)"))
+        out.append("  " + dim("· nothing connected yet"))
         return out
-    shown = edges[:6]
+    out.append("  " + dim("│"))                                  # trunk
+    shown = edges[:8]
     for i, ed in enumerate(shown):
-        last = i == len(shown) - 1 and len(edges) <= 6
+        last = i == len(shown) - 1 and len(edges) <= 8
         node = ed.get("node") or {}
-        ntitle = (node.get("title") or node.get("key") or "").split("/")[-1]
+        name = (node.get("title") or node.get("key") or "").split("/")[-1]
         rel = ed.get("rel") or ""
-        out.append("   " + dim("└─" if last else "├─") + " " + tui._dotfor(node) + " "
-                   + _clip(ntitle, width - 12) + " " + dim(_clip(rel, 6)))
-    if len(edges) > 6:
-        out.append("   " + dim(f"   +{len(edges) - 6} more"))
+        branch = "└──" if last else "├──"
+        line = "  " + dim(branch) + tui._dotfor(node) + " " + a(_clip(name, width - 11))
+        if rel:
+            line += " " + dim("· " + _clip(rel, 8))
+        out.append(line)
+    if len(edges) > 8:
+        out.append("  " + dim(f"└── +{len(edges) - 8} more"))
     return out
 
 
@@ -239,11 +208,9 @@ def _sidebar_text(app, state, art, st) -> str:
     # then the same edges as a labelled list beneath it.
     ego = state.get("ego")
     if ego and ego.get("auto"):
-        L.append(dim("  ── graph · busiest ──"))
+        L.append(dim("  ── graph · busiest node ──"))
     else:
         L.append(dim(f"  ── graph · {short} ──" if short else "  ── graph ──"))
-    if ego and ego.get("edges"):
-        L += ["  " + a(row) for row in _ego_graph(ego, width=32, height=11)]
     L += _ego_lines(ego, st)
     L.append("")
 
