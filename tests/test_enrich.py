@@ -53,3 +53,21 @@ def test_enrich_caches_edges_including_citation(tmp_path):
     assert ("A5019527971", "W2963403868", "authored") in triples
     assert ("W2963403868", "W2949547662", "cites") in triples
     assert ("W3000000001", "W2963403868", "cites") in triples
+
+
+def test_enrich_fetches_citations_by_resolved_id_not_the_seed_doi(tmp_path):
+    """Seeding by DOI must still fetch citations by the work's resolved OpenAlex
+    id — passing the raw DOI to cited_by errors against the live API (which is
+    why `add paper <doi>` crashed after saving the paper)."""
+    vault, cache = Vault(tmp_path), Cache()
+    fake = FakeClient()
+    seen = {}
+    orig = fake.cited_by
+
+    def spy(seed_id, per_page=25):
+        seen["arg"] = seed_id
+        return orig(seed_id, per_page=per_page)
+
+    fake.cited_by = spy
+    enrich_seed(fake, vault, cache, "https://doi.org/10.48550/arXiv.1706.03762")
+    assert seen["arg"] == "W2963403868"          # resolved id, not the DOI we seeded with

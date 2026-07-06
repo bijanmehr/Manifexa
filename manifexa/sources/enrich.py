@@ -30,8 +30,10 @@ def enrich_seed(client, vault, cache, seed_id: str, *, cap: int = 25) -> dict:
                 n["title"] = _title(fetched[n["key"]])
                 n["doi"] = fetched[n["key"]].get("doi")
 
-    # Citations: papers that cite the seed (arrive titled).
-    for w in client.cited_by(seed_id, per_page=cap):
+    # Citations: papers that cite the seed (arrive titled). Query by the
+    # resolved OpenAlex key — the live API rejects a raw DOI here, which is what
+    # crashed enrichment when seeding by DOI.
+    for w in client.cited_by(seed_key, per_page=cap):
         key = normalize_openalex_id(w["id"])
         nodes.append({"key": key, "type": "paper", "title": _title(w), "doi": w.get("doi")})
         edges.append({"src": key, "dst": seed_key, "rel": "cites"})
