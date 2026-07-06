@@ -193,7 +193,7 @@ def _statusline(app, home, engine, phosphor, width) -> str:
 
 HELP = """COMMANDS
   ls                     list your curated entities
-  open <id>              show an entity + connections
+  open <id>              inspect an entity: fields + connections (alias: inspect)
   around <id>            surface hidden connections
   path <a> <b>           the chain between two entities
   bridges                connectors, ranked by betweenness
@@ -417,24 +417,26 @@ def _render_entity(app, eid, st):
     if not eid:
         return st.dim("usage: open <id>")
     try:
-        e = app.open(eid)
-    except (FileNotFoundError, OSError):
-        return f"{eid} {st.dim('· candidate · not in your graph — promote it:')} promote {eid}"
-    g = app.graph()
-    conns = g.neighbors_with_rel(e.id)
-    lines = [f"{st.bold(e.title or e.id)} {st.dim('· ' + e.type + ' · ' + e.status)}"]
-    for k, v in e.meta.items():
-        if k in ("type", "title", "status"):
-            continue
-        lines.append(f"  {st.dim(_pad(k, 12))} {', '.join(v) if isinstance(v, list) else v}")
-    lines.append(f"  {st.dim('notes')}  {e.body or '—'}")
-    lines.append(f"  {st.dim('connections (' + str(len(conns)) + ')')}")
-    if not conns:
-        lines.append("    " + st.dim("none yet"))
-    for nbr, rel in conns:
-        n = g.node(nbr) or {}
-        lines.append(f"    {_dotfor(n)} {st.a(_pad(nbr, 30))} {st.dim(rel)}")
-    lines.append(st.dim(f"  → around {e.id} · graph {e.id} · similar {e.id}"))
+        v = app.inspect(eid)
+    except (FileNotFoundError, OSError, KeyError):
+        return f"{eid} {st.dim('· not found — check the id with  ls / search')}"
+    lines = [f"{st.bold(v.title or v.id)} {st.dim('· ' + v.type + ' · ' + v.status)}"]
+    for k, val in v.attributes.items():                              # scalar attributes
+        shown = ", ".join(str(x) for x in val) if isinstance(val, list) else str(val)
+        lines.append(f"  {st.dim(_pad(k, 11))} {shown}")
+    if v.relations:                                                 # relations, grouped by kind
+        lines.append(st.dim(f"  connections ({v.degree})"))
+        for rel, nodes in v.relations.items():
+            names = " · ".join(_dotfor(n) + " " + st.a(n.get("title") or n["key"]) for n in nodes[:6])
+            more = st.dim(f" +{len(nodes) - 6}") if len(nodes) > 6 else ""
+            lines.append(f"  {st.dim(_pad(rel, 11))} {names}{more}")
+    else:
+        lines.append(st.dim("  connections (0) — none yet; link it to a topic"))
+    lines.append(f"  {st.dim(_pad('notes', 11))} {v.notes or '—'}")
+    warns = [i for i in v.issues if i.severity == "warn"]
+    if warns:
+        lines.append(st.dim("  ⚠ " + " · ".join(i.message for i in warns[:3])))
+    lines.append(st.dim(f"  → around {v.id} · graph {v.id} · similar {v.id}"))
     return "\n".join(lines)
 
 
@@ -572,7 +574,7 @@ def dispatch(app, line, st=None):
         return render_manual(st)
     if c in ("ls", "list"):
         return _render_list(app, st)
-    if c in ("open", "cat"):
+    if c in ("open", "cat", "inspect"):
         return _render_entity(app, a[0] if a else "", st)
     if c == "around":
         if not a:
@@ -621,7 +623,10 @@ def dispatch(app, line, st=None):
     if c == "new":
         if len(a) < 2:
             return st.dim('usage: new <type> <title>')
-        return f"created → {st.a(app.create(a[0], ' '.join(a[1:]).strip(chr(34) + chr(39))))}"
+        try:
+            return f"created → {st.a(app.create(a[0], ' '.join(a[1:]).strip(chr(34) + chr(39))))}"
+        except Exception as e:
+            return st.dim(f"can't create: {e}  (types: {', '.join(TYPES)})")
     if c in ("link", "connect"):
         if len(a) < 2:
             return st.dim('usage: link <from-id> <to-id> [relation]   e.g.  link paper/on-heat topic/thermodynamics about')
@@ -630,7 +635,10 @@ def dispatch(app, line, st=None):
             return st.dim(f"{src} isn't one of your entities — create it first  (new <type> \"…\")")
         if not app.graph().has_node(dst):
             return st.dim(f"{dst} doesn't exist yet — create it first, then link")
-        app.link(src, dst, rel)
+        try:
+            app.link(src, dst, rel)
+        except Exception as e:
+            return st.dim(f"can't link: {e}")
         return f"linked  {st.a(src)}  {st.dim('—' + rel + '→')}  {st.a(dst)}"
     if c == "promote":
         return f"promoted → {st.a(app.promote(a[0]))}" if a else st.dim("usage: promote <id>")

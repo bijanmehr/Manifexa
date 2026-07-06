@@ -59,10 +59,10 @@ SLASH = [
     ("/clear", "clear the transcript"),
     ("/quit", "exit"),
 ]
-_COMPLETE_IDS = ("open", "around", "graph", "similar", "promote", "remove", "rm", "note", "path",
-                 "expand", "complete", "link", "connect")
+_COMPLETE_IDS = ("open", "inspect", "around", "graph", "similar", "promote", "remove", "rm", "note",
+                 "path", "expand", "complete", "link", "connect")
 _TYPES = tui.TYPES
-_CMDS = ("help", "manual", "ls", "open", "around", "path", "bridges", "clusters",
+_CMDS = ("help", "manual", "ls", "open", "inspect", "around", "path", "bridges", "clusters",
          "similar", "stats", "graph", "search", "add", "new", "link", "promote", "remove",
          "note", "extract", "expand", "complete", "ask", "embed", "export",
          "import", "vault", "tree", "summary", "color", "spin", "about", "clear", "quit", "exit")
@@ -287,7 +287,7 @@ def _process(app, text, transcript, state, st):
         transcript.append(tui.dispatch(app, body, st))
     except Exception as e:
         transcript.append(st.dim(f"error: {e}"))
-    if head in ("open", "cat", "around", "graph", "similar") and len(parts) > 1:
+    if head in ("open", "cat", "inspect", "around", "graph", "similar") and len(parts) > 1:
         state["current"] = parts[1]
         if parts[1] not in state["recent"]:
             state["recent"].append(parts[1])

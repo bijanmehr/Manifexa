@@ -240,20 +240,35 @@ class App:
         return stats
 
     def create(self, type: str, title: str, body: str = "", **fields) -> str:
-        """Create a curated entity of any type by hand (person, lab, book, …)."""
+        """Create a curated entity by hand, validated against the type schema.
+        Raises ``SchemaError`` on a hard violation (unknown type, missing
+        required field, bad-typed value); missing recommended fields are allowed."""
+        from .store import schema
+
         meta = {"type": type, "title": title, "status": "curated", **fields}
         entity = Entity(id=make_id(type, title), meta=meta, body=body)
+        errs = schema.errors(schema.validate(entity))
+        if errs:
+            raise schema.SchemaError("; ".join(i.message for i in errs))
         with self._lock:
             self.vault.write(entity)
             self.rebuild()
         return entity.id
 
     def link(self, src: str, dst: str, rel: str = "related") -> tuple[str, str, str]:
-        """Connect two entities with a curated edge. Stored files-as-truth as a
-        ``[[wikilink]]`` in ``src``'s frontmatter (so Obsidian shows it too),
-        then materialised into the derived graph. Idempotent per target."""
+        """Connect two entities with a curated edge, validated against the schema
+        (the relation's target type must be allowed). Stored files-as-truth as a
+        ``[[wikilink]]`` in ``src``'s frontmatter (so Obsidian shows it too), then
+        materialised into the derived graph. Idempotent per target."""
+        from .store import schema
+
         with self._lock:
             entity = self.vault.read(src)                       # src must be a curated file
+            dst_type = (self.engine.node(dst) or {}).get("type") or (
+                self.vault.read(dst).type if self.vault.exists(dst) else "")
+            issue = schema.relation_ok(entity.type, rel, dst_type)
+            if issue and issue.severity == "error":
+                raise schema.SchemaError(issue.message)
             if not any(t == dst for _, t in entity.relations):
                 links = [x for x in (entity.meta.get("links") or []) if isinstance(x, str)]
                 links.append(f"{rel} :: [[{dst}]]")
@@ -261,6 +276,23 @@ class App:
                 self.vault.write(entity)
                 self.rebuild()
             return (src, dst, rel)
+
+    def inspect(self, entity_id: str):
+        """The full structured record for a node — attributes + relations + notes
+        + schema issues — assembled from its file and the graph (a NodeView)."""
+        from .store.node import build_view
+
+        with self._lock:
+            try:
+                entity = self.vault.read(entity_id)
+            except (FileNotFoundError, OSError):
+                node = self.engine.node(entity_id)
+                if not node:
+                    raise
+                entity = Entity(id=entity_id, meta={"type": node.get("type", ""),
+                                                    "title": node.get("title", ""),
+                                                    "status": node.get("status", "candidate")})
+            return build_view(entity, self.engine)
 
     def source_search(self, query: str, limit: int = 8) -> list[dict]:
         """Search OpenAlex for papers to add (search-to-add)."""
