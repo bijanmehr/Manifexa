@@ -60,6 +60,13 @@ def test_slash_prefix_is_accepted(tmp_path):
     assert dispatch(app, "/ls") == dispatch(app, "ls")
 
 
+def test_add_type_creates_entity_by_hand(tmp_path):
+    app = _app(tmp_path)
+    out = dispatch(app, "add topic Dirichlet process (DP-GMM)")   # not a doi → create, don't 404
+    assert "created" in out
+    assert any(e.type == "topic" for e in app.list())
+
+
 def test_export_then_import_roundtrips(tmp_path):
     app = _app(tmp_path)                      # person/ada-lovelace + paper/analytical-engine
     dump = tmp_path / "dump.json"

@@ -191,7 +191,8 @@ HELP = """COMMANDS
   stats                  system status dashboard
   graph <id>             ascii ego-net
   search <term>          filter your graph
-  add <doi|openalex>     seed + enrich from the web
+  add <type> <title>     create an entity by hand (same as: new)
+  add <doi|openalex>     …or seed a paper + enrich from the web
   new <type> <title>     create an entity by hand
   promote <id>           candidate -> curated
   rm <id>                delete an entity
@@ -223,6 +224,7 @@ _DIAGRAM = (
 _MANUAL_SECTIONS = (
     ("capture", (
         ("new <type> <title>", "create an entity by hand"),
+        ("add <type> <title>", "create by hand (like new) — or a doi to enrich"),
         ("add <doi|openalex>", "seed a paper + enrich from the web"),
         ("extract", "paste text → Claude pulls entities & links"),
         ("import / export [file]", "load / save the whole database as one file"),
@@ -535,8 +537,14 @@ def dispatch(app, line, st=None):
                          [f"  {_pad(e.type, 7)} {st.a(_pad(e.id, 30))} {e.title or ''}" for e in ents])
     if c == "add":
         if not a:
-            return st.dim("usage: add <doi|openalex id>")
-        r = app.add(" ".join(a))
+            return st.dim("usage:  add <type> <title>  (create by hand)  ·  add <doi|openalex id>  (enrich from the web)")
+        if a[0].lower() in TYPES and len(a) >= 2:                       # add <type> <title> → create by hand
+            return f"created → {st.a(app.create(a[0].lower(), ' '.join(a[1:]).strip(chr(34) + chr(39))))}"
+        try:
+            r = app.add(" ".join(a))
+        except Exception:
+            return st.dim("couldn't find \"" + " ".join(a) + "\" online — for a paper use a DOI / OpenAlex id; "
+                          "to create an entity by hand use  add <type> <title>  (e.g.  add topic \"Dirichlet process\")")
         return f"+ {st.a(r['entity'])} {st.dim('· ' + str(r.get('nodes', 0)) + ' nodes, ' + str(r.get('edges', 0)) + ' edges cached')}"
     if c == "new":
         if len(a) < 2:

@@ -77,7 +77,7 @@ def _complete(app, text):
     if argn == 0:
         return [(c, -len(frag), "") for c in _CMDS if c.startswith(frag)]
     cmd = words[0].lower()
-    if cmd == "new" and argn == 1:
+    if cmd in ("new", "add") and argn == 1:
         return [(t, -len(frag), "type") for t in _TYPES if t.startswith(frag)]
     if cmd in ("color", "phosphor") and argn == 1:
         return [(c, -len(frag), "colour") for c in tui.THEMES if c.startswith(frag)]
