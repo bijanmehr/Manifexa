@@ -1,0 +1,21 @@
+{
+  "id": "https://openalex.org/W2963403868",
+  "doi": "https://doi.org/10.48550/arxiv.1706.03762",
+  "title": "Attention Is All You Need",
+  "display_name": "Attention Is All You Need",
+  "publication_year": 2017,
+  "authorships": [
+    {
+      "author": {"id": "https://openalex.org/A5048491430", "display_name": "Ashish Vaswani"},
+      "institutions": [{"id": "https://openalex.org/I1291425158", "display_name": "Google (United States)"}]
+    },
+    {
+      "author": {"id": "https://openalex.org/A5019527971", "display_name": "Noam Shazeer"},
+      "institutions": [{"id": "https://openalex.org/I1291425158", "display_name": "Google (United States)"}]
+    }
+  ],
+  "referenced_works": [
+    "https://openalex.org/W2949547662",
+    "https://openalex.org/W2950527759"
+  ]
+}

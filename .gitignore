@@ -1,0 +1,19 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Derived / local data — the vault is the user's, kept in their own home
+*.db
+*.sqlite3
+data/
+log/
+*.arcadedb/
+graph.arcadedb/
+manifexa-export.json
+
+# Tooling / OS
+.superpowers/
+.DS_Store

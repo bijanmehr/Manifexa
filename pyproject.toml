@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "manifexa"
+version = "0.1.0a0"
+description = "A personal research knowledge graph — seed by hand, enriched by automation, mined for hidden connections."
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6.0",
+    "networkx>=3.0",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+neo4j = ["neo4j>=5.0"]
+arcadedb = ["arcadedb-embedded>=26"]
+ai = ["anthropic"]
+tui = ["prompt_toolkit>=3.0"]
+dev = ["pytest>=8.0", "prompt_toolkit>=3.0", "arcadedb-embedded>=26"]
+
+[project.scripts]
+manifexa = "manifexa.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["manifexa"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
