@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shutil
 import sys
 import time
@@ -168,6 +169,16 @@ def _dotfor(node) -> str:
     if node.get("status") == "candidate":
         return "○"
     return DOT.get(node.get("type"), "●")
+
+
+# A DOI, DOI/arXiv URL, or OpenAlex work id — something to FETCH from the web,
+# not a hand-typed title. Lets `add paper <doi>` enrich instead of titling an
+# entity with the DOI.
+_SEED_RE = re.compile(r"^(?:https?://\S+|doi:10\.\d+/\S+|10\.\d+/\S+|W\d+|openalex:\S+)$", re.I)
+
+
+def _looks_like_seed(s: str) -> bool:
+    return bool(_SEED_RE.match((s or "").strip()))
 
 
 def _statusline(app, home, engine, phosphor, width) -> str:
@@ -594,12 +605,17 @@ def dispatch(app, line, st=None):
     if c == "add":
         if not a:
             return st.dim("usage:  add <type> <title>  (create by hand)  ·  add <doi|openalex id>  (enrich from the web)")
-        if a[0].lower() in TYPES and len(a) >= 2:                       # add <type> <title> → create by hand
-            return f"created → {st.a(app.create(a[0].lower(), ' '.join(a[1:]).strip(chr(34) + chr(39))))}"
+        seed = " ".join(a)
+        if a[0].lower() in TYPES and len(a) >= 2:                       # add <type> <rest>
+            rest = " ".join(a[1:]).strip(chr(34) + chr(39))
+            if _looks_like_seed(rest):                                 # add paper <doi> → fetch it, don't title with the doi
+                seed = rest
+            else:                                                      # add <type> <title> → create by hand
+                return f"created → {st.a(app.create(a[0].lower(), rest))}"
         try:
-            r = app.add(" ".join(a))
+            r = app.add(seed)
         except Exception:
-            return st.dim("couldn't find \"" + " ".join(a) + "\" online — for a paper use a DOI / OpenAlex id; "
+            return st.dim("couldn't find \"" + seed + "\" online — for a paper use a DOI / OpenAlex id; "
                           "to create an entity by hand use  add <type> <title>  (e.g.  add topic \"Dirichlet process\")")
         return f"+ {st.a(r['entity'])} {st.dim('· ' + str(r.get('nodes', 0)) + ' nodes, ' + str(r.get('edges', 0)) + ' edges cached')}"
     if c == "new":

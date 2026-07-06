@@ -67,6 +67,41 @@ def test_add_type_creates_entity_by_hand(tmp_path):
     assert any(e.type == "topic" for e in app.list())
 
 
+def test_looks_like_seed_detects_dois_and_ids():
+    from manifexa.tui import _looks_like_seed
+    for s in ("10.48550/arXiv.2604.03042", "https://doi.org/10.1/x", "doi:10.1/x", "W2741809807"):
+        assert _looks_like_seed(s), s
+    for s in ("Attention Is All You Need", "Dirichlet process (DP-GMM)", "particle swarm optimization"):
+        assert not _looks_like_seed(s), s
+
+
+def test_add_paper_with_doi_fetches_not_titles_with_the_doi(tmp_path, monkeypatch):
+    """`add paper <doi>` must route to web enrichment — not create an entity
+    literally titled with the DOI URL (the bug behind the malformed paper)."""
+    monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
+
+    class _RecordFail:
+        def __init__(self):
+            self.asked = []
+
+        def get_work(self, x):
+            self.asked.append(x)
+            raise LookupError("offline")
+
+    fake = _RecordFail()
+    app = App(str(tmp_path), client=fake, crossref_client=_RecordFail())
+    dispatch(app, "add paper https://doi.org/10.48550/arXiv.2604.03042")
+    assert any("10.48550" in x for x in fake.asked)          # it tried to FETCH the doi
+    assert app.list() == []                                  # …and created no doi-titled paper
+
+
+def test_add_paper_with_real_title_still_creates_by_hand(tmp_path):
+    app = App(str(tmp_path))
+    out = dispatch(app, "add paper Attention Is All You Need")
+    assert "created" in out
+    assert "Attention Is All You Need" in [e.title for e in app.list()]
+
+
 def test_export_then_import_roundtrips(tmp_path):
     app = _app(tmp_path)                      # person/ada-lovelace + paper/analytical-engine
     dump = tmp_path / "dump.json"
