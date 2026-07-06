@@ -109,6 +109,40 @@ def suggestions(app, current):
     return out[:6]
 
 
+def _clip(s, n):
+    s = str(s)
+    return s if len(s) <= n else s[: max(1, n - 1)] + "…"
+
+
+def _ego_lines(ego, st, width=28):
+    """Render the focal node + its direct edges as a compact connection tree —
+    the sidebar's live 'what connects to what' graph view. Type-coloured node
+    glyphs, dimmed relation labels, focal node in the accent colour. The graph is
+    undirected: an edge shows whether the focal node is its source or target."""
+    a, dim = st.a, st.dim
+    if not ego or not ego.get("focal"):
+        return ["  " + dim("no edges yet —"), "  " + dim("link two entities")]
+    focal = ego["focal"]
+    ftitle = (focal.get("title") or focal.get("key") or "").split("/")[-1]
+    deg = ego.get("degree", len(ego.get("edges", [])))
+    out = ["  " + tui._dotfor(focal) + " " + a(_clip(ftitle, width - 6)) + " " + dim("·" + str(deg))]
+    edges = ego.get("edges", [])
+    if not edges:
+        out.append("     " + dim("(no direct links)"))
+        return out
+    shown = edges[:6]
+    for i, ed in enumerate(shown):
+        last = i == len(shown) - 1 and len(edges) <= 6
+        node = ed.get("node") or {}
+        ntitle = (node.get("title") or node.get("key") or "").split("/")[-1]
+        rel = ed.get("rel") or ""
+        out.append("   " + dim("└─" if last else "├─") + " " + tui._dotfor(node) + " "
+                   + _clip(ntitle, width - 12) + " " + dim(_clip(rel, 6)))
+    if len(edges) > 6:
+        out.append("   " + dim(f"   +{len(edges) - 6} more"))
+    return out
+
+
 def _refresh_context(app, state):
     """Recompute the sidebar's live data — graph counts + the focused entity's
     hidden connections. Called once per command, never in the per-frame animation
@@ -131,6 +165,26 @@ def _refresh_context(app, state):
     except Exception:
         state["around"] = []
 
+    # ego-net for the sidebar graph view — the focal node's direct edges, built
+    # from the export we already fetched (no extra engine calls in the render
+    # path). No focus → default to the busiest node so there's always a picture.
+    node_by = {n["key"]: n for n in nodes}
+    deg: dict = {}
+    for e in edges:
+        deg[e["src"]] = deg.get(e["src"], 0) + 1
+        deg[e["dst"]] = deg.get(e["dst"], 0) + 1
+    focal_key = focus if (focus and focus in node_by) else (max(deg, key=deg.get) if deg else None)
+    ego = None
+    if focal_key and focal_key in node_by:
+        nbrs = []
+        for e in edges:
+            other = e["dst"] if e["src"] == focal_key else (e["src"] if e["dst"] == focal_key else None)
+            if other is not None:
+                nbrs.append({"rel": e.get("rel", ""), "node": node_by.get(other, {"key": other})})
+        ego = {"focal": node_by[focal_key], "edges": nbrs,
+               "degree": deg.get(focal_key, 0), "auto": not (focus and focus in node_by)}
+    state["ego"] = ego
+
 
 def _sidebar_text(app, state, art, st) -> str:
     """The right pane: a live context + discovery surface. Compact art header,
@@ -152,15 +206,25 @@ def _sidebar_text(app, state, art, st) -> str:
         L.append("  " + tui.DOT.get(t, "·") + " " + tui._pad(t, 7) + " " + a(tui.hbar(by[t], mx, 8)) + " " + str(by[t]))
     L.append("  " + dim(f"{counts.get('curated', 0)} curated · {counts.get('edges', 0)} edges · {state.get('engine', '')}"))
 
+    # graph view — direct connections of the focus (or the busiest node)
+    ego = state.get("ego")
     L.append("")
-    L.append(dim(f"  ── around {short} ──" if focus else "  ── around ──"))
+    if ego and ego.get("auto"):
+        L.append(dim("  ── connections · busiest ──"))
+    else:
+        L.append(dim(f"  ── connections · {short} ──" if short else "  ── connections ──"))
+    L += _ego_lines(ego, st)
+
+    # hidden links — one hop further out (shared neighbours, not yet connected)
+    L.append("")
+    L.append(dim(f"  ── hidden · {short} ──" if focus else "  ── hidden links ──"))
     around = state.get("around") or []
     if not focus:
-        L += ["  " + dim("open an entity to see"), "  " + dim("its hidden links")]
+        L += ["  " + dim("open an entity to see"), "  " + dim("what it sits near")]
     elif not around:
-        L += ["  " + dim("nothing yet — enrich"), "  " + dim("with add / extract")]
+        L += ["  " + dim("none yet — enrich or"), "  " + dim("expand this node")]
     else:
-        for r in around[:4]:
+        for r in around[:3]:
             title = (r.get("title") or r["key"]).split("/")[-1][:13]
             L.append("  ▸ " + a(title) + " " + dim((r.get("reason") or "")[:8]))
 

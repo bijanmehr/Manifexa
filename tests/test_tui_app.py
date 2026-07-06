@@ -121,3 +121,67 @@ def test_build_constructs_the_application(tmp_path):
     application = tui_app.build(_app(tmp_path))
     assert application is not None
     assert application.layout is not None
+
+
+# --- the sidebar graph view (ego-net of the focused node) ---
+def _ego():
+    return {
+        "focal": {"key": "paper/on-heat", "title": "On Heat", "type": "paper", "status": "curated"},
+        "edges": [
+            {"rel": "about", "node": {"key": "topic/thermodynamics", "title": "Thermodynamics", "type": "topic", "status": "curated"}},
+            {"rel": "cites", "node": {"key": "paper/carnot", "title": "Carnot 1824", "type": "paper", "status": "candidate"}},
+        ],
+        "degree": 2, "auto": False,
+    }
+
+
+def test_ego_lines_shows_focal_and_its_edges():
+    txt = "\n".join(tui_app._ego_lines(_ego(), tui.Style(False)))
+    assert "On Heat" in txt                                   # the focal node
+    assert "Thermodynamics" in txt and "about" in txt         # a neighbour + its relation
+    assert "Carnot 1824" in txt and "cites" in txt
+
+
+def test_ego_lines_empty_prompts_to_link():
+    lines = tui_app._ego_lines(None, tui.Style(False))
+    assert any("link" in ln.lower() for ln in lines)
+
+
+def test_refresh_context_builds_ego_from_focus(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
+    a = App(str(tmp_path))
+    p = a.create("paper", "On Heat")
+    t = a.create("topic", "Thermodynamics")
+    a.link(p, t, "about")
+    state = {"current": p, "recent": []}
+    tui_app._refresh_context(a, state)
+    ego = state["ego"]
+    assert ego["focal"]["key"] == p
+    assert any(e["node"]["key"] == t and e["rel"] == "about" for e in ego["edges"])
+
+
+def test_refresh_context_ego_defaults_to_busiest_node(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
+    a = App(str(tmp_path))
+    p = a.create("paper", "Hub")
+    t = a.create("topic", "T")
+    c = a.create("concept", "C")
+    a.link(p, t)
+    a.link(p, c)                                              # Hub has 2 edges, the others 1
+    state = {"current": None, "recent": []}
+    tui_app._refresh_context(a, state)
+    assert state["ego"]["focal"]["key"] == p                 # busiest node chosen automatically
+    assert state["ego"]["auto"] is True
+
+
+def test_sidebar_renders_the_graph_view(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
+    a = App(str(tmp_path))
+    p = a.create("paper", "On Heat")
+    t = a.create("topic", "Thermodynamics")
+    a.link(p, t, "about")
+    state = {"current": p, "recent": [], "engine": "networkx", "home": "~"}
+    tui_app._refresh_context(a, state)
+    txt = tui_app._sidebar_text(a, state, tui.ART, tui.Style(False))
+    assert "connections" in txt.lower()                      # the graph-view section header
+    assert "Thermodynamics" in txt                           # the connected node shows in it
