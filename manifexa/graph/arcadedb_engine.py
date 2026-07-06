@@ -23,6 +23,22 @@ _SCHEMA = (
 )
 
 
+def _quiet_jvm():
+    """Silence ArcadeDB's JVM console logging (it logs through java.util.logging),
+    so its INFO / index-build lines can't corrupt the full-screen TUI — notably
+    when a `vault` switch opens a new database mid-session. Persists per process."""
+    try:
+        import jpype
+
+        if not jpype.isJVMStarted():
+            return
+        jul = jpype.JPackage("java").util.logging
+        jul.LogManager.getLogManager().reset()
+        jul.Logger.getLogger("").setLevel(jul.Level.OFF)
+    except Exception:
+        pass
+
+
 class ArcadeDBEngine:
     def __init__(self, db) -> None:
         self._db = db
@@ -35,6 +51,7 @@ class ArcadeDBEngine:
         import arcadedb_embedded as adb
 
         db = adb.open_database(path) if adb.database_exists(path) else adb.create_database(path)
+        _quiet_jvm()                       # before schema DDL, so index-build stays silent
         return cls(db)
 
     # --- helpers ---
