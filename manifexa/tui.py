@@ -206,6 +206,7 @@ HELP = """COMMANDS
   import <path>          load a snapshot back in
   vault [path]           show / switch the vault folder
   tree                   list the vault's files
+  summary                overview of the whole vault (counts · tree · graph)
   color / phosphor <c>   amber green teal cyan magenta white blue (persists)
   manual                 what this is + a diagram of the system
   spin · about · clear · help · quit / exit"""
@@ -236,6 +237,7 @@ _MANUAL_SECTIONS = (
         ("bridges · clusters", "connectors · emerging communities"),
         ("similar <id>", "semantic neighbours (needs: embed)"),
         ("graph <id> · stats · search", "ego-net · dashboard · filter"),
+        ("summary · tree", "overview of everything · file tree"),
     )),
     ("curate", (
         ("promote <id>", "candidate → curated (into your vault)"),
@@ -332,6 +334,58 @@ def render_tree(app, st) -> str:
         L.append(dim("  (empty)"))
     L.append("")
     L.append(dim(f"  {sum(len(v) for v in groups.values())} files · {len(groups)} types"))
+    return "\n".join(L)
+
+
+def render_summary(app, st) -> str:
+    """A one-screen overview of the whole vault: counts per type, the entities as
+    a tree, graph size + key connectors, and a confirmation of what's on disk."""
+    from pathlib import Path as _P
+    a, dim = st.a, st.dim
+    name = app.home.name or "vault"
+    path = str(app.home).replace(str(_P.home()), "~")
+    ents = app.list()
+    by = _by_type(ents)
+    exp = app.export()
+    N, E = len(exp.get("nodes", [])), len(exp.get("edges", []))
+    dens = (2 * E / (N * (N - 1))) if N > 1 else 0.0
+
+    L = [a(f"  ▤ {name} — summary"), dim(f"  {path}"),
+         dim(f"  {len(ents)} entities · {N} nodes · {E} edges · density {dens:.3f}"), ""]
+    if not ents:
+        L.append(dim('  empty — try  add topic "…"  ·  add <doi>  ·  extract'))
+        return "\n".join(L)
+
+    mx = max(by.values())
+    for t in _ORDER + [x for x in by if x not in _ORDER]:
+        if by.get(t):
+            L.append(f"  {DOT.get(t, '·')} {_pad(t, 8)} {a(hbar(by[t], mx, 12))} {by[t]}")
+
+    groups = {}
+    for e in sorted(ents, key=lambda e: e.id):
+        groups.setdefault(e.type or "note", []).append(e)
+    L += ["", dim("  ── entities ──")]
+    for t in [x for x in TYPES if x in groups] + [x for x in groups if x not in TYPES]:
+        items = groups[t]
+        L.append(f"  {DOT.get(t, '·')} {a(t)}/")
+        for i, e in enumerate(items[:12]):
+            branch = "└─" if i == min(len(items), 12) - 1 else "├─"
+            L.append(f"     {dim(branch)} {e.title or e.id}")
+        if len(items) > 12:
+            L.append(dim(f"     +{len(items) - 12} more"))
+
+    if E:
+        bridges = app.bridges(limit=3)
+        if bridges:
+            L += ["", dim("  ── key connectors ──")]
+            for r in bridges:
+                L.append(f"  {DOT.get(r.get('type'), '·')} {a(r.get('title') or r['key'])}"
+                         f"  {dim('betweenness ' + format(r.get('score', 0), '.2f'))}")
+        clusters = app.clusters()
+        if clusters:
+            L.append(dim(f"  {len(clusters)} cluster(s): sizes " + ", ".join(str(c['size']) for c in clusters[:8])))
+
+    L += ["", dim(f"  ✓ saved on disk — {len(ents)} Markdown files in  {path}/vault/")]
     return "\n".join(L)
 
 
@@ -602,6 +656,8 @@ def dispatch(app, line, st=None):
         return render_vault(app, st)
     if c in ("tree", "files"):
         return render_tree(app, st)
+    if c in ("summary", "overview"):
+        return render_summary(app, st)
     if c == "export":
         import json
         from pathlib import Path

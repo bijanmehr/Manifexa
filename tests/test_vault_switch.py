@@ -41,6 +41,16 @@ def test_tree_lists_files(tmp_path):
     assert "ada-lovelace" in dispatch(a, "tree")
 
 
+def test_summary_overviews_the_vault(tmp_path):
+    a = App(str(tmp_path / "v"))
+    a.create("person", "Ada Lovelace")
+    a.create("topic", "Thermodynamics")
+    out = dispatch(a, "summary")
+    assert "summary" in out.lower()
+    assert "person" in out and "topic" in out
+    assert "saved on disk" in out.lower()          # persistence confirmation
+
+
 def test_vault_switch_via_command(tmp_path, monkeypatch):
     monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
     a = App(str(tmp_path / "v1"))

@@ -38,6 +38,7 @@ SLASH = [
     ("/manual", "the manual page + diagram"),
     ("/vault", "show / switch vault folder"),
     ("/tree", "list the vault files"),
+    ("/summary", "overview of the whole vault"),
     ("/ask", "LLM natural-language search"),
     ("/spin", "toggle 3D animation"),
     ("/ls", "list curated entities"),
