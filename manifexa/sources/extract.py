@@ -18,7 +18,7 @@ EXTRACTION_SCHEMA = {
             "items": {
                 "type": "object",
                 "properties": {
-                    "type": {"type": "string", "enum": ["person", "paper", "lab", "book", "concept"]},
+                    "type": {"type": "string", "enum": ["person", "paper", "lab", "book", "note", "concept", "topic"]},
                     "title": {"type": "string"},
                 },
                 "required": ["type", "title"],

@@ -15,7 +15,9 @@ import sys
 import time
 from pathlib import Path
 
-DOT = {"person": "●", "paper": "◆", "lab": "▣", "book": "❒"}
+DOT = {"person": "●", "paper": "◆", "lab": "▣", "book": "❒",
+       "note": "✎", "concept": "✦", "topic": "⬡"}
+TYPES = ("person", "paper", "lab", "book", "note", "concept", "topic")
 THEMES = {"amber": "214", "green": "78", "teal": "43", "cyan": "51",
           "magenta": "201", "white": "255", "blue": "39"}
 
@@ -285,7 +287,7 @@ def _by_type(ents):
     return by
 
 
-_ORDER = ["person", "paper", "lab", "book", "note", "concept"]
+_ORDER = list(TYPES)
 
 
 def render_vault(app, st) -> str:

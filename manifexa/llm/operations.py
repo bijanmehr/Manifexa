@@ -17,7 +17,7 @@ _GRAPH_SCHEMA = {
     "type": "object",
     "properties": {
         "entities": {"type": "array", "items": {"type": "object", "properties": {
-            "type": {"type": "string", "enum": ["person", "paper", "lab", "book", "concept"]},
+            "type": {"type": "string", "enum": ["person", "paper", "lab", "book", "note", "concept", "topic"]},
             "title": {"type": "string"}}, "required": ["type", "title"], "additionalProperties": False}},
         "edges": {"type": "array", "items": {"type": "object", "properties": {
             "source": {"type": "string"}, "target": {"type": "string"}, "rel": {"type": "string"}},

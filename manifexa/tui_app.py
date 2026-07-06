@@ -57,7 +57,7 @@ SLASH = [
     ("/quit", "exit"),
 ]
 _COMPLETE_IDS = ("open", "around", "graph", "similar", "promote", "rm", "note", "path", "expand", "complete")
-_TYPES = ("person", "paper", "lab", "book", "note", "concept")
+_TYPES = tui.TYPES
 _CMDS = ("help", "manual", "ls", "open", "around", "path", "bridges", "clusters",
          "similar", "stats", "graph", "search", "add", "new", "promote", "rm",
          "note", "extract", "expand", "complete", "ask", "embed", "export",
@@ -145,9 +145,8 @@ def _sidebar_text(app, state, art, st) -> str:
     L.append(dim("  " + state.get("home", "")))
     by = state.get("by_type") or {}
     mx = max(by.values()) if by else 1
-    for t in ("person", "paper", "lab", "book"):
-        if by.get(t):
-            L.append("  " + tui.DOT.get(t, "·") + " " + tui._pad(t, 7) + " " + a(tui.hbar(by[t], mx, 8)) + " " + str(by[t]))
+    for t in [x for x in tui.TYPES if by.get(x)] + [x for x in by if x not in tui.TYPES]:
+        L.append("  " + tui.DOT.get(t, "·") + " " + tui._pad(t, 7) + " " + a(tui.hbar(by[t], mx, 8)) + " " + str(by[t]))
     L.append("  " + dim(f"{counts.get('curated', 0)} curated · {counts.get('edges', 0)} edges · {state.get('engine', '')}"))
 
     L.append("")
