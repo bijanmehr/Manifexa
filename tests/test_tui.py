@@ -102,6 +102,15 @@ def test_add_paper_with_real_title_still_creates_by_hand(tmp_path):
     assert "Attention Is All You Need" in [e.title for e in app.list()]
 
 
+def test_remove_deletes_entity_and_rm_is_an_alias(tmp_path):
+    app = _app(tmp_path)                       # person/ada-lovelace + paper/analytical-engine
+    out = dispatch(app, "remove person/ada-lovelace")
+    assert "person/ada-lovelace" not in {e.id for e in app.list()}
+    assert "remov" in out.lower() or "delet" in out.lower()
+    dispatch(app, "rm paper/analytical-engine")   # rm still works
+    assert app.list() == []
+
+
 def test_export_then_import_roundtrips(tmp_path):
     app = _app(tmp_path)                      # person/ada-lovelace + paper/analytical-engine
     dump = tmp_path / "dump.json"

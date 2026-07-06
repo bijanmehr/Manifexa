@@ -207,7 +207,7 @@ HELP = """COMMANDS
   new <type> <title>     create an entity by hand
   link <a> <b> [rel]     connect two entities (a —rel→ b)
   promote <id>           candidate -> curated
-  rm <id>                delete an entity
+  remove <id>            delete an entity (alias: rm)
   note <id>              edit notes (multi-line)
   extract                paste text -> Claude pulls entities
   expand <id>            LLM: propose new related entities (candidates)
@@ -254,7 +254,7 @@ _MANUAL_SECTIONS = (
     ("curate", (
         ("link <a> <b> [rel]", "connect two entities by hand (a [[wikilink]] b)"),
         ("promote <id>", "candidate → curated (into your vault)"),
-        ("note <id> · rm <id>", "edit notes · delete an entity"),
+        ("note <id> · remove <id>", "edit notes · delete an entity"),
         ("embed", "fetch embeddings for semantic search"),
     )),
     ("ai · llm (claude or local)", (
@@ -634,11 +634,11 @@ def dispatch(app, line, st=None):
         return f"linked  {st.a(src)}  {st.dim('—' + rel + '→')}  {st.a(dst)}"
     if c == "promote":
         return f"promoted → {st.a(app.promote(a[0]))}" if a else st.dim("usage: promote <id>")
-    if c == "rm":
+    if c in ("remove", "rm", "delete", "del"):
         if not a:
-            return st.dim("usage: rm <id>")
+            return st.dim("usage: remove <id>")
         app.remove(a[0])
-        return st.dim(f"deleted {a[0]}")
+        return st.dim(f"removed {a[0]}")
     if c == "embed":
         return st.dim(f"embedded {app.embed().get('embedded', 0)} papers — try  similar <id>")
     if c == "expand":
