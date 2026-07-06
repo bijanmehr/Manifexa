@@ -7,6 +7,7 @@
     manifexa open <entity-id>          print an entity
     manifexa list                      list curated entities
     manifexa                           interactive terminal REPL (also: manifexa shell)
+    manifexa <vault-path>              open that folder as the vault (e.g. manifexa ~/research)
 
 Data lives under --home (default $MANIFEXA_HOME or ~/.manifexa).
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 from pathlib import Path
 
 from .app import App
@@ -24,6 +26,25 @@ def _default_home() -> str:
     return os.environ.get("MANIFEXA_HOME", str(Path.home() / ".manifexa"))
 
 
+_SUBCOMMANDS = {"list", "bridges", "clusters", "embed", "export", "import", "add",
+                "around", "similar", "open", "new", "path", "promote", "shell", "manual"}
+
+
+def _is_vault_path(s: str) -> bool:
+    """A bare first argument that names a folder (not a flag or subcommand) means
+    'open this vault' — e.g. ``manifexa ~/research``."""
+    return (not s.startswith("-") and s not in _SUBCOMMANDS
+            and ("/" in s or s.startswith("~") or s.startswith(".")
+                 or os.path.isdir(os.path.expanduser(s))))
+
+
+def _rewrite_argv(argv):
+    """`manifexa <vault-path> [--plain]` → open that folder's shell."""
+    if argv and _is_vault_path(argv[0]):
+        return ["--home", os.path.expanduser(argv[0]), "shell", *argv[1:]]
+    return argv
+
+
 def _print_results(results):
     for r in results:
         print(f"  ▸ {r.get('title') or r['key']:<48}  {r.get('reason', '')}")
@@ -32,6 +53,8 @@ def _print_results(results):
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    argv = _rewrite_argv(argv)          # `manifexa <vault-path>` opens that folder's shell
     parser = argparse.ArgumentParser(prog="manifexa", description="A personal research knowledge graph.")
     parser.add_argument("--home", default=_default_home())
     sub = parser.add_subparsers(dest="cmd")

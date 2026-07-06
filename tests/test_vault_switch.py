@@ -1,6 +1,19 @@
-"""Switching vault folders + the vault/tree views."""
+"""Switching vault folders + the vault/tree views + the `manifexa <path>` shorthand."""
+import os
+
 from manifexa.app import App
+from manifexa.cli import _rewrite_argv
 from manifexa.tui import dispatch
+
+
+def test_cli_vault_path_opens_that_folder_as_shell():
+    assert _rewrite_argv(["~/manifexa_test"]) == ["--home", os.path.expanduser("~/manifexa_test"), "shell"]
+    assert _rewrite_argv(["~/v", "--plain"]) == ["--home", os.path.expanduser("~/v"), "shell", "--plain"]
+    assert _rewrite_argv(["./data"])[0] == "--home"
+    # real subcommands and flags are left untouched
+    assert _rewrite_argv(["list"]) == ["list"]
+    assert _rewrite_argv(["add", "10.1/x"]) == ["add", "10.1/x"]
+    assert _rewrite_argv(["--home", "/x", "shell"]) == ["--home", "/x", "shell"]
 
 
 def test_reopen_switches_vault(tmp_path, monkeypatch):
