@@ -56,7 +56,36 @@ SLASH = [
     ("/clear", "clear the transcript"),
     ("/quit", "exit"),
 ]
-_COMPLETE_IDS = ("open", "around", "graph", "similar", "promote", "rm", "note", "path")
+_COMPLETE_IDS = ("open", "around", "graph", "similar", "promote", "rm", "note", "path", "expand", "complete")
+_TYPES = ("person", "paper", "lab", "book", "note", "concept")
+_CMDS = ("help", "manual", "ls", "open", "around", "path", "bridges", "clusters",
+         "similar", "stats", "graph", "search", "add", "new", "promote", "rm",
+         "note", "extract", "expand", "complete", "ask", "embed", "export",
+         "import", "vault", "tree", "color", "spin", "about", "clear", "quit", "exit")
+
+
+def _complete(app, text):
+    """Completion candidates for a partial line — commands, entity ids, entity
+    types, colours — as (text, start_position, meta) tuples. Pure of
+    prompt_toolkit, so it's unit-tested; the live UI adds filesystem paths."""
+    if text.startswith("/"):
+        return [(c, -len(text), d) for c, d in SLASH if c.startswith(text)]
+    words = text.split()
+    trailing = text.endswith(" ")
+    argn = len(words) if trailing else max(0, len(words) - 1)
+    frag = "" if (trailing or not words) else words[-1]
+    if argn == 0:
+        return [(c, -len(frag), "") for c in _CMDS if c.startswith(frag)]
+    cmd = words[0].lower()
+    if cmd == "new" and argn == 1:
+        return [(t, -len(frag), "type") for t in _TYPES if t.startswith(frag)]
+    if cmd in ("color", "phosphor") and argn == 1:
+        return [(c, -len(frag), "colour") for c in tui.THEMES if c.startswith(frag)]
+    if cmd in _COMPLETE_IDS:
+        fl = frag.lower()
+        return [(e.id, -len(frag), e.title or "") for e in app.list()
+                if fl in e.id.lower() or fl in (e.title or "").lower()]
+    return []
 
 
 def suggestions(app, current):
@@ -202,7 +231,8 @@ def build(app):
     unit-constructable so the layout is verified even without a live terminal."""
     from prompt_toolkit.application import Application, get_app
     from prompt_toolkit.buffer import Buffer
-    from prompt_toolkit.completion import Completer, Completion
+    from prompt_toolkit.completion import Completer, Completion, PathCompleter
+    from prompt_toolkit.document import Document
     from prompt_toolkit.formatted_text import ANSI
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout.containers import Float, FloatContainer, HSplit, VSplit, Window
@@ -239,20 +269,23 @@ def build(app):
         run_line(buff.text)
         return False  # clear the input
 
+    _dirs = PathCompleter(only_directories=True, expanduser=True)   # for `vault <path>`
+    _paths = PathCompleter(expanduser=True)                          # for import / export
+
     class Palette(Completer):
         def get_completions(self, document, complete_event):
             text = document.text_before_cursor
-            if text.startswith("/"):
-                for cmd, desc in SLASH:
-                    if cmd.startswith(text):
-                        yield Completion(cmd, start_position=-len(text), display=cmd, display_meta=desc)
+            words = text.split()
+            cmd = words[0].lower() if words else ""
+            trailing = text.endswith(" ")
+            argn = len(words) if trailing else max(0, len(words) - 1)
+            if cmd in ("vault", "import", "export") and argn >= 1:      # filesystem paths
+                arg = text[len(words[0]):].lstrip()
+                fs = _dirs if cmd == "vault" else _paths
+                yield from fs.get_completions(Document(arg, len(arg)), complete_event)
                 return
-            parts = text.split()
-            if parts and parts[0] in _COMPLETE_IDS:
-                frag = parts[-1] if len(parts) > 1 else ""
-                for e in app.list():
-                    if e.id.startswith(frag):
-                        yield Completion(e.id, start_position=-len(frag), display=e.id, display_meta=e.title or "")
+            for txt, start, meta in _complete(app, text):
+                yield Completion(txt, start_position=start, display=txt, display_meta=meta)
 
     input_buffer = Buffer(completer=Palette(), complete_while_typing=True,
                           multiline=False, accept_handler=on_accept)

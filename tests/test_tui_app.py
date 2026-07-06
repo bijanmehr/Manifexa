@@ -98,6 +98,23 @@ def test_process_echoes_and_captures_output(tmp_path):
     assert "Ada Lovelace" in joined    # and its output captured
 
 
+def test_complete_covers_commands_ids_types_colours(tmp_path):
+    from manifexa.app import App
+
+    app = App(str(tmp_path))
+    app.create("person", "Ada Lovelace")
+
+    def C(t):
+        return [x[0] for x in tui_app._complete(app, t)]
+
+    assert "vault" in C("va")                          # command names
+    assert "person/ada-lovelace" in C("open ")         # all entity ids after a command
+    assert "person/ada-lovelace" in C("around ada")    # ids match on slug / title substring
+    assert "person" in C("new p") and "paper" in C("new p")   # entity types
+    assert C("color gr") == ["green"]                  # colours
+    assert "/graph" in C("/gr")                        # slash palette
+
+
 def test_build_constructs_the_application(tmp_path):
     if not tui_app.available():
         pytest.skip("prompt_toolkit not installed")
