@@ -199,6 +199,16 @@ def _sidebar_text(app, state, art, st) -> str:
     L = [a(ln) for ln in art.splitlines()]
     L += ["", a("  M A N I F E X A"), ""]
 
+    # graph view first — so "what connects to what" is visible immediately, even
+    # on short terminals. Direct edges of the focus (or the busiest node).
+    ego = state.get("ego")
+    if ego and ego.get("auto"):
+        L.append(dim("  ── connections · busiest ──"))
+    else:
+        L.append(dim(f"  ── connections · {short} ──" if short else "  ── connections ──"))
+    L += _ego_lines(ego, st)
+    L.append("")
+
     L.append(dim(f"  ▤ vault · {state.get('vault', '')}"))
     L.append(dim("  " + state.get("home", "")))
     by = state.get("by_type") or {}
@@ -206,15 +216,6 @@ def _sidebar_text(app, state, art, st) -> str:
     for t in [x for x in tui.TYPES if by.get(x)] + [x for x in by if x not in tui.TYPES]:
         L.append("  " + tui.DOT.get(t, "·") + " " + tui._pad(t, 7) + " " + a(tui.hbar(by[t], mx, 8)) + " " + str(by[t]))
     L.append("  " + dim(f"{counts.get('curated', 0)} curated · {counts.get('edges', 0)} edges · {state.get('engine', '')}"))
-
-    # graph view — direct connections of the focus (or the busiest node)
-    ego = state.get("ego")
-    L.append("")
-    if ego and ego.get("auto"):
-        L.append(dim("  ── connections · busiest ──"))
-    else:
-        L.append(dim(f"  ── connections · {short} ──" if short else "  ── connections ──"))
-    L += _ego_lines(ego, st)
 
     # hidden links — one hop further out (shared neighbours, not yet connected)
     L.append("")
