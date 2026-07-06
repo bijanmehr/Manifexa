@@ -50,6 +50,7 @@ SLASH = [
     ("/stats", "system status"),
     ("/add", "seed + enrich <doi>"),
     ("/new", "create <type> <title>"),
+    ("/link", "connect two entities <a> <b>"),
     ("/embed", "fetch embeddings"),
     ("/export", "one-file db snapshot"),
     ("/import", "load a snapshot"),
@@ -57,12 +58,13 @@ SLASH = [
     ("/clear", "clear the transcript"),
     ("/quit", "exit"),
 ]
-_COMPLETE_IDS = ("open", "around", "graph", "similar", "promote", "rm", "note", "path", "expand", "complete")
+_COMPLETE_IDS = ("open", "around", "graph", "similar", "promote", "rm", "note", "path",
+                 "expand", "complete", "link", "connect")
 _TYPES = tui.TYPES
 _CMDS = ("help", "manual", "ls", "open", "around", "path", "bridges", "clusters",
-         "similar", "stats", "graph", "search", "add", "new", "promote", "rm",
+         "similar", "stats", "graph", "search", "add", "new", "link", "promote", "rm",
          "note", "extract", "expand", "complete", "ask", "embed", "export",
-         "import", "vault", "tree", "color", "spin", "about", "clear", "quit", "exit")
+         "import", "vault", "tree", "summary", "color", "spin", "about", "clear", "quit", "exit")
 
 
 def _complete(app, text):

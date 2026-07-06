@@ -66,3 +66,24 @@ class Entity:
                     seen.add(target)
                     targets.append(target)
         return targets
+
+    @property
+    def relations(self) -> list[tuple[str, str]]:
+        """``(relation, target-id)`` pairs from the ``links`` frontmatter list —
+        the labelled edges this entity draws by hand. Each item is
+        ``"<rel> :: [[target]]"``; the ``<rel> ::`` prefix is optional and
+        defaults to ``related``. This is what turns a curated ``[[wikilink]]``
+        into a graph edge."""
+        out: list[tuple[str, str]] = []
+        for item in self.meta.get("links") or []:
+            if not isinstance(item, str):
+                continue
+            rel, rest = "related", item
+            if "::" in item:
+                head, rest = item.split("::", 1)
+                rel = head.strip() or "related"
+            m = _WIKILINK.search(rest)
+            target = (m.group(1) if m else rest).strip()
+            if target:
+                out.append((rel, target))
+        return out

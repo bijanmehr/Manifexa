@@ -248,6 +248,20 @@ class App:
             self.rebuild()
         return entity.id
 
+    def link(self, src: str, dst: str, rel: str = "related") -> tuple[str, str, str]:
+        """Connect two entities with a curated edge. Stored files-as-truth as a
+        ``[[wikilink]]`` in ``src``'s frontmatter (so Obsidian shows it too),
+        then materialised into the derived graph. Idempotent per target."""
+        with self._lock:
+            entity = self.vault.read(src)                       # src must be a curated file
+            if not any(t == dst for _, t in entity.relations):
+                links = [x for x in (entity.meta.get("links") or []) if isinstance(x, str)]
+                links.append(f"{rel} :: [[{dst}]]")
+                entity.meta["links"] = links
+                self.vault.write(entity)
+                self.rebuild()
+            return (src, dst, rel)
+
     def source_search(self, query: str, limit: int = 8) -> list[dict]:
         """Search OpenAlex for papers to add (search-to-add)."""
         from .sources.openalex import normalize_openalex_id

@@ -194,6 +194,7 @@ HELP = """COMMANDS
   add <type> <title>     create an entity by hand (same as: new)
   add <doi|openalex>     …or seed a paper + enrich from the web
   new <type> <title>     create an entity by hand
+  link <a> <b> [rel]     connect two entities (a —rel→ b)
   promote <id>           candidate -> curated
   rm <id>                delete an entity
   note <id>              edit notes (multi-line)
@@ -240,6 +241,7 @@ _MANUAL_SECTIONS = (
         ("summary · tree", "overview of everything · file tree"),
     )),
     ("curate", (
+        ("link <a> <b> [rel]", "connect two entities by hand (a [[wikilink]] b)"),
         ("promote <id>", "candidate → curated (into your vault)"),
         ("note <id> · rm <id>", "edit notes · delete an entity"),
         ("embed", "fetch embeddings for semantic search"),
@@ -604,6 +606,16 @@ def dispatch(app, line, st=None):
         if len(a) < 2:
             return st.dim('usage: new <type> <title>')
         return f"created → {st.a(app.create(a[0], ' '.join(a[1:]).strip(chr(34) + chr(39))))}"
+    if c in ("link", "connect"):
+        if len(a) < 2:
+            return st.dim('usage: link <from-id> <to-id> [relation]   e.g.  link paper/on-heat topic/thermodynamics about')
+        src, dst, rel = a[0], a[1], " ".join(a[2:]) or "related"
+        if not app.vault.exists(src):
+            return st.dim(f"{src} isn't one of your entities — create it first  (new <type> \"…\")")
+        if not app.graph().has_node(dst):
+            return st.dim(f"{dst} doesn't exist yet — create it first, then link")
+        app.link(src, dst, rel)
+        return f"linked  {st.a(src)}  {st.dim('—' + rel + '→')}  {st.a(dst)}"
     if c == "promote":
         return f"promoted → {st.a(app.promote(a[0]))}" if a else st.dim("usage: promote <id>")
     if c == "rm":
