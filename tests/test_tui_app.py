@@ -142,6 +142,20 @@ def test_ego_lines_shows_focal_and_its_edges():
     assert "Carnot 1824" in txt and "cites" in txt
 
 
+def test_ego_graph_is_a_fixed_canvas_with_focal_centred():
+    rows = tui_app._ego_graph(_ego(), width=21, height=9)
+    assert len(rows) == 9 and all(len(r) == 21 for r in rows)   # fixed rectangle
+    assert rows[4][10] == "◆"                                   # focal paper glyph dead centre
+    joined = "".join(rows)
+    assert ("⬡" in joined) or ("○" in joined)                   # neighbour glyphs present
+    assert any(ch in joined for ch in "─│╱╲")                   # connecting edges drawn
+
+
+def test_ego_graph_handles_no_edges():
+    rows = tui_app._ego_graph({"focal": {"key": "paper/p", "type": "paper"}, "edges": []}, width=21, height=9)
+    assert len(rows) == 9 and all(len(r) == 21 for r in rows)   # still a valid canvas, no crash
+
+
 def test_ego_lines_empty_prompts_to_link():
     lines = tui_app._ego_lines(None, tui.Style(False))
     assert any("link" in ln.lower() for ln in lines)
@@ -183,5 +197,5 @@ def test_sidebar_renders_the_graph_view(tmp_path, monkeypatch):
     state = {"current": p, "recent": [], "engine": "networkx", "home": "~"}
     tui_app._refresh_context(a, state)
     txt = tui_app._sidebar_text(a, state, tui.ART, tui.Style(False))
-    assert "connections" in txt.lower()                      # the graph-view section header
+    assert "graph" in txt.lower()                            # the graph-view section header
     assert "Thermodynamics" in txt                           # the connected node shows in it

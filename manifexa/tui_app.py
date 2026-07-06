@@ -16,6 +16,7 @@ installed (or there's no real terminal), ``run()`` falls back to ``tui.repl``.
 """
 from __future__ import annotations
 
+import math
 import sys
 import time
 from pathlib import Path
@@ -115,6 +116,40 @@ def _clip(s, n):
     return s if len(s) <= n else s[: max(1, n - 1)] + "…"
 
 
+def _ego_graph(ego, width=32, height=11):
+    """A compact radial node-link diagram: the focal node at the centre, its
+    neighbours placed around it, with lines connecting them. Returns plain canvas
+    rows (the caller tints them) — an actual little graph, not a list."""
+    grid = [[" "] * width for _ in range(height)]
+
+    def put(x, y, ch):
+        if 0 <= y < height and 0 <= x < width:
+            grid[y][x] = ch
+
+    cx, cy = width // 2, height // 2
+    edges = (ego.get("edges") or [])[:8]
+    n = len(edges)
+    rx, ry = width // 2 - 2, height // 2 - 1
+    pts = []
+    for i, ed in enumerate(edges):
+        ang = (2 * math.pi * i / n) - math.pi / 2 if n else 0.0
+        pts.append((int(round(cx + math.cos(ang) * rx)),
+                    int(round(cy + math.sin(ang) * ry)), ed))
+    for x, y, _ed in pts:                                    # edges first, nodes sit on top
+        dx, dy = x - cx, y - cy
+        steps = max(abs(dx), abs(dy))
+        if not steps:
+            continue
+        ch = "─" if abs(dy) * 2 <= abs(dx) else "│" if abs(dx) * 2 <= abs(dy) else \
+            ("╲" if (dx > 0) == (dy > 0) else "╱")
+        for s in range(1, steps):
+            put(int(round(cx + dx * s / steps)), int(round(cy + dy * s / steps)), ch)
+    for x, y, ed in pts:
+        put(x, y, tui._dotfor(ed.get("node") or {}))
+    put(cx, cy, tui._dotfor(ego.get("focal") or {}))
+    return ["".join(r) for r in grid]
+
+
 def _ego_lines(ego, st, width=28):
     """Render the focal node + its direct edges as a compact connection tree —
     the sidebar's live 'what connects to what' graph view. Type-coloured node
@@ -200,12 +235,15 @@ def _sidebar_text(app, state, art, st) -> str:
     L += ["", a("  M A N I F E X A"), ""]
 
     # graph view first — so "what connects to what" is visible immediately, even
-    # on short terminals. Direct edges of the focus (or the busiest node).
+    # on short terminals. A node-link diagram of the focus (or the busiest node),
+    # then the same edges as a labelled list beneath it.
     ego = state.get("ego")
     if ego and ego.get("auto"):
-        L.append(dim("  ── connections · busiest ──"))
+        L.append(dim("  ── graph · busiest ──"))
     else:
-        L.append(dim(f"  ── connections · {short} ──" if short else "  ── connections ──"))
+        L.append(dim(f"  ── graph · {short} ──" if short else "  ── graph ──"))
+    if ego and ego.get("edges"):
+        L += ["  " + a(row) for row in _ego_graph(ego, width=32, height=11)]
     L += _ego_lines(ego, st)
     L.append("")
 
