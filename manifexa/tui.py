@@ -508,96 +508,58 @@ def _boxlines(title, d, W):
     return ["┌" + "─" * (W - 2) + "┐", "│" + inner + "│", "└" + "─" * (W - 2) + "┘"]
 
 
-def _draw_edge(grid, x0, y0, x1, y1):
-    """Plot a straight line between two cells with box-drawing chars (won't
-    overwrite anything already drawn)."""
-    dx, dy = x1 - x0, y1 - y0
-    steps = max(abs(dx), abs(dy))
-    if not steps:
-        return
-    ch = "─" if abs(dy) * 2 <= abs(dx) else "│" if abs(dx) * 2 <= abs(dy) else \
-        ("╲" if (dx > 0) == (dy > 0) else "╱")
-    for s in range(1, steps):
-        x, y = int(round(x0 + dx * s / steps)), int(round(y0 + dy * s / steps))
-        if 0 <= y < len(grid) and 0 <= x < len(grid[0]) and grid[y][x] == " ":
-            grid[y][x] = ch
+def _clip(s, n):
+    s = str(s)
+    return s if len(s) <= n else s[: max(1, n - 1)] + "…"
 
 
-def _map_positions(nodes, edges) -> dict:
-    """Force-directed layout of the whole graph, normalised to the unit square:
-    ``{key: (x, y)}`` with x, y in [0, 1]. Deterministic (fixed seed)."""
-    import networkx as nx
-
-    g = nx.Graph()
-    g.add_nodes_from(n["key"] for n in nodes)
-    g.add_edges_from((e["src"], e["dst"]) for e in edges)
-    try:
-        pos = nx.spring_layout(g, seed=7, k=0.9)
-    except Exception:
-        pos = nx.circular_layout(g)
-    xs = [p[0] for p in pos.values()] or [0.0]
-    ys = [p[1] for p in pos.values()] or [0.0]
-    minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
-    return {k: ((p[0] - minx) / ((maxx - minx) or 1),
-                (p[1] - miny) / ((maxy - miny) or 1)) for k, p in pos.items()}
-
-
-def _map_name(n) -> str:
-    name = (n.get("title") or n.get("key") or "").split("/")[-1]
-    return name if len(name) <= 18 else name[:17] + "…"
-
-
-def _map_draw(nodes, edges, npos, st, width, height) -> str:
-    """Draw the graph from normalised positions ``npos`` onto a width×height
-    canvas — edges as lines, each node labelled inline with its glyph + name
-    (not a code). Shared by the ``map`` command and the sidebar."""
-    a = st.a
-
-    def cell(k):
-        x01, y01 = npos.get(k, (0.5, 0.5))
-        x = 2 + int(max(0.0, min(1.0, x01)) * (width - 6))
-        y = 1 + int(max(0.0, min(1.0, y01)) * (height - 2))
-        return max(0, min(width - 3, x)), max(0, min(height - 1, y))
-
-    cells, taken = {}, set()
-    for n in nodes:
-        x, y = cell(n["key"])
-        while (x, y) in taken and x < width - 5:          # nudge off exact collisions
-            x += 1
-        taken.add((x, y))
-        cells[n["key"]] = (x, y)
-
-    grid = [[" "] * width for _ in range(height)]
-    for e in edges:
-        if e["src"] in cells and e["dst"] in cells:
-            (x0, y0), (x1, y1) = cells[e["src"]], cells[e["dst"]]
-            _draw_edge(grid, x0, y0, x1, y1)
-    for n in nodes:                                        # glyph + name, over the edges
-        x, y = cells[n["key"]]
-        icon, name = _dotfor(n), _map_name(n)
-        if x > width * 0.55:                               # right half → grow the label leftward
-            label = name + " " + icon
-            start = max(0, x - len(label) + 1)
-        else:                                              # left half → grow it rightward
-            label, start = icon + " " + name, x
-        for j, ch in enumerate(label):
-            if 0 <= start + j < width and 0 <= y < height:
-                grid[y][start + j] = ch
-    return "\n".join(a("".join(r).rstrip()) for r in grid)
+def _tree_walk(key, prefix, rel, is_last, adj, node_by, visited, st, width, out):
+    """Emit one node and recurse its unvisited neighbours as an indented tree —
+    a spanning tree of the component, rooted at ``key``. Clean box-drawing
+    branches, the relation labelled on each edge, the node named."""
+    a, dim = st.a, st.dim
+    visited.add(key)
+    n = node_by.get(key, {})
+    name = (n.get("title") or key).split("/")[-1]
+    if rel is None:                                            # component root
+        out.append("  " + _dotfor(n) + " " + a(_clip(name, max(10, width - 6))))
+        child_prefix = "  "
+    else:
+        branch = "└─ " if is_last else "├─ "
+        out.append("  " + dim(prefix + branch) + dim(_clip(rel, 10).ljust(11))
+                   + _dotfor(n) + " " + a(_clip(name, max(8, width - len(prefix) - 20))))
+        child_prefix = prefix + ("   " if is_last else "│  ")
+    children = []
+    for nb, r in adj.get(key, []):
+        if nb not in visited:
+            visited.add(nb)                                   # reserve so siblings don't duplicate it
+            children.append((nb, r))
+    for i, (nb, r) in enumerate(children):
+        _tree_walk(nb, child_prefix, r, i == len(children) - 1, adj, node_by, visited, st, width, out)
 
 
-def _render_map(app, st, width=84, height=22):
-    """The whole graph as one ASCII node-link map: every node placed by a
-    force-directed layout, labelled with its name, edges between them."""
+def _render_map(app, st, width=84):
+    """The whole graph as clean indented trees — one per connected component,
+    each rooted at its most-connected node, edges labelled with their relation.
+    Isolated nodes appear as their own single-line entries."""
     d = app.export()
     nodes, edges = d.get("nodes", []), d.get("edges", [])
     if not nodes:
         return st.dim("empty graph — add or create something first")
-    if len(nodes) > 60:
-        return st.dim(f"{len(nodes)} nodes is too many to draw clearly — narrow it with  "
-                      f"search <term>  or focus one with  graph <id>")
-    body = _map_draw(nodes, edges, _map_positions(nodes, edges), st, width, height)
-    return body + "\n" + st.dim(f"  {len(nodes)} nodes · {len(edges)} edges")
+    node_by = {n["key"]: n for n in nodes}
+    adj: dict = {}
+    for e in edges:
+        adj.setdefault(e["src"], []).append((e["dst"], e.get("rel", "")))
+        adj.setdefault(e["dst"], []).append((e["src"], e.get("rel", "")))
+    deg = {k: len(adj.get(k, [])) for k in node_by}
+    visited, out = set(), []
+    for root in sorted(node_by, key=lambda k: (-deg.get(k, 0), k)):   # biggest hubs first
+        if root in visited:
+            continue
+        if out:
+            out.append("")                                    # blank line between components
+        _tree_walk(root, "", None, True, adj, node_by, visited, st, width, out)
+    return "\n".join(out) + "\n" + st.dim(f"  {len(nodes)} nodes · {len(edges)} edges")
 
 
 def _render_graph(app, eid, st):

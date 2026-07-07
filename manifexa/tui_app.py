@@ -91,28 +91,8 @@ def _complete(app, text):
     return []
 
 
-def _graph_sidebar(state, st, width, height):
-    """The right pane IS the graph: the whole knowledge graph drawn statically —
-    every node labelled with its name, edges between them. No animation."""
-    a, dim = st.a, st.dim
-    nodes = state.get("mapnodes") or []
-    edges = state.get("mapedges") or []
-    npos = state.get("mappos") or {}
-    head = [a("  M A N I F E X A"), "", dim(f"  ── graph · {state.get('vault', '')} ──"), ""]
-    if not nodes or not npos:
-        return "\n".join(head + [dim("  nothing to draw yet —"), "",
-                                 dim("  add a paper:   add <doi>"),
-                                 dim('  add a topic:   add topic "…"'),
-                                 dim("  connect them:  link <a> <b>")])
-    body = tui._map_draw(nodes, edges, npos, st, max(20, width - 2), max(8, height - len(head) - 2))
-    L = head + ["  " + ln for ln in body.splitlines()]
-    L.append(dim(f"  ── {len(nodes)} nodes · {len(edges)} edges ──"))
-    return "\n".join(L)
-
-
 def _refresh_context(app, state):
-    """Recompute the sidebar's data once per command: graph counts + the cached
-    whole-graph layout the static map is drawn from."""
+    """Recompute the sidebar's data once per command: vault, counts by type."""
     d = app.export()
     nodes, edges = d.get("nodes", []), d.get("edges", [])
     ents = app.list()
@@ -125,11 +105,28 @@ def _refresh_context(app, state):
     for e in ents:
         by[e.type or "note"] = by.get(e.type or "note", 0) + 1
     state["by_type"] = by
-    try:
-        state["mappos"] = tui._map_positions(nodes, edges) if nodes else {}
-    except Exception:
-        state["mappos"] = {}
-    state["mapnodes"], state["mapedges"] = nodes, edges
+
+
+def _context_panel(state, st, width, height):
+    """A calm, minimal right pane: where you are — vault, counts by type, the
+    open node — and two pointers. The graph itself lives in the `map` command,
+    not here."""
+    a, dim = st.a, st.dim
+    counts = state.get("counts") or {}
+    by = state.get("by_type") or {}
+    L = [a("  M A N I F E X A"), "",
+         dim(f"  ▤ {state.get('vault', 'vault')}"),
+         dim("  " + state.get("home", "")), "",
+         dim(f"  {counts.get('curated', 0)} entities · {counts.get('edges', 0)} edges")]
+    mx = max(by.values()) if by else 1
+    for t in [x for x in tui.TYPES if by.get(x)] + [x for x in by if x not in tui.TYPES]:
+        L.append("  " + tui.DOT.get(t, "·") + " " + tui._pad(t, 8) + " " + a(tui.hbar(by[t], mx, 8)) + " " + str(by[t]))
+    cur = state.get("current")
+    L += ["", dim("  ── you are here ──"),
+          ("  " + a(tui._clip(cur.split("/")[-1], max(8, width - 3)))) if cur
+          else dim("  (nothing open — inspect <id>)")]
+    L += ["", dim("  map    the whole graph"), dim("  help   all commands")]
+    return "\n".join(L)
 
 
 def _process(app, text, transcript, state, st):
@@ -250,20 +247,17 @@ def build(app):
         return ANSI(st.dim(f"── manifexa · {len(app.list())} curated · {state['home']} · {state['engine']}/{phos} " + "─" * 400))
 
     def get_sidebar():
-        # the right pane IS the graph — the whole thing, static, sized to the
-        # pane (~40% of the terminal). Redraws on each command, not on a clock.
+        # a calm, minimal context pane (no graph — that's the `map` command).
         size = get_app().output.get_size()
-        w = max(24, int(size.columns * 0.4) - 2)
-        h = max(10, size.rows - 1)
-        return ANSI(_graph_sidebar(state, st, w, h))
+        return ANSI(_context_panel(state, st, max(20, int(size.columns * 0.28) - 2), max(10, size.rows - 1)))
 
     input_window = Window(BufferControl(buffer=input_buffer), height=1)
     left = HSplit([
         Window(FormattedTextControl(get_output), wrap_lines=True),
         Window(FormattedTextControl(get_status), height=1),
         VSplit([Window(FormattedTextControl(lambda: ANSI(st.a("› "))), width=2), input_window]),
-    ], width=D(weight=3))
-    right = Window(FormattedTextControl(get_sidebar), wrap_lines=False, width=D(weight=2))
+    ], width=D(weight=7))
+    right = Window(FormattedTextControl(get_sidebar), wrap_lines=False, width=D(weight=3))
     body = VSplit([left, Window(width=1, char="│"), right])
     root = FloatContainer(content=body,
                           floats=[Float(xcursor=True, ycursor=True,

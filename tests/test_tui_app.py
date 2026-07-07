@@ -26,47 +26,27 @@ def test_slash_palette_has_core_commands():
         assert x in cmds
 
 
-def test_refresh_context_computes_counts_and_caches_layout(tmp_path, monkeypatch):
+def test_refresh_context_computes_counts(tmp_path, monkeypatch):
     monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
     a = _app(tmp_path)                        # 1 curated (Ada)
     state = {"current": None, "recent": []}
     tui_app._refresh_context(a, state)
     assert state["counts"]["curated"] == 1
-    assert "mappos" in state and "mapnodes" in state           # the layout the sidebar animates from
+    assert state["by_type"].get("person") == 1
 
 
-# --- the live graph sidebar (the whole graph, drifting) ---
-def _graph_state(tmp_path, monkeypatch):
+def test_context_panel_is_minimal_and_has_no_graph(tmp_path, monkeypatch):
     monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
-    a = App(str(tmp_path))
-    p = a.create("paper", "On Heat")
-    t = a.create("topic", "Thermodynamics")
-    a.link(p, t, "about")
-    state = {"current": None, "recent": [], "vault": "v"}
+    a = _app(tmp_path)                        # person Ada
+    a.create("paper", "On Heat")
+    state = {"current": "person/ada-lovelace", "vault": "v"}
     tui_app._refresh_context(a, state)
-    return state
-
-
-def test_graph_sidebar_draws_the_graph_with_named_nodes(tmp_path, monkeypatch):
-    state = _graph_state(tmp_path, monkeypatch)
-    txt = tui_app._graph_sidebar(state, tui.Style(False), width=44, height=24)
-    assert "graph" in txt.lower()                              # the header
-    assert "On Heat" in txt and "Thermodynamics" in txt        # nodes labelled by NAME, inline
-    assert "nodes" in txt.lower() and "edges" in txt.lower()   # the count line
-
-
-def test_graph_sidebar_is_static(tmp_path, monkeypatch):
-    state = _graph_state(tmp_path, monkeypatch)
-    st = tui.Style(False)                                      # no time arg → deterministic, no animation
-    assert tui_app._graph_sidebar(state, st, 44, 24) == tui_app._graph_sidebar(state, st, 44, 24)
-
-
-def test_graph_sidebar_empty_prompts_to_add(tmp_path, monkeypatch):
-    monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
-    state = {"vault": "v"}
-    tui_app._refresh_context(App(str(tmp_path)), state)
-    txt = tui_app._graph_sidebar(state, tui.Style(False), width=44, height=24)
-    assert "add" in txt.lower()                                # guidance when there's nothing to draw
+    txt = tui_app._context_panel(state, tui.Style(False), 30, 24)
+    assert "MANIFEXA" in txt.replace(" ", "")
+    assert "person" in txt and "paper" in txt                 # counts by type
+    assert "entities" in txt.lower()
+    assert "ada-lovelace" in txt                              # the open node
+    assert "map" in txt.lower()                               # pointer to the graph command
 
 
 def test_quit_aliases_all_signal_exit(tmp_path):
