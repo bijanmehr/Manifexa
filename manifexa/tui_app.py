@@ -94,66 +94,53 @@ def _complete(app, text):
     return []
 
 
-def suggestions(app, current):
-    """A few context-aware next steps for the sidebar."""
-    if not app.list():
-        return [('new person "…"', "add your first entity"),
-                ("add <doi>", "seed a paper from the web"),
-                ("extract", "paste text → Claude")]
-    out = []
-    if current:
-        out += [(f"around {current}", "hidden connections"),
-                (f"graph {current}", "see its ego-net"),
-                (f"expand {current}", "grow it with an LLM"),
-                (f"similar {current}", "semantic neighbours")]
-    out += [("bridges", "who connects your graph"),
-            ("clusters", "emerging communities"),
-            ("stats", "the big picture")]
-    return out[:6]
-
-
 def _clip(s, n):
     s = str(s)
     return s if len(s) <= n else s[: max(1, n - 1)] + "…"
 
 
-def _ego_lines(ego, st, width=36):
-    """The sidebar graph view: the focal node with a visible trunk down to each
-    connected node, every branch labelled with its neighbour's name + the
-    relation. Reads as a graph (root → edges → nodes) but stays legible — no
-    unlabelled dots. Undirected: a branch shows whatever the focal connects to."""
+def _wobble(nodes, npos, t, amp=0.035):
+    """Gently orbit each node around its settled position — a low-key, fully
+    deterministic drift (a function of the frame time ``t`` and the node index),
+    so the graph is alive without jumping around."""
+    wob = {}
+    for i, n in enumerate(nodes):
+        x0, y0 = npos.get(n["key"], (0.5, 0.5))
+        ph = i * 1.7
+        wob[n["key"]] = (x0 + amp * math.sin(t * 0.7 + ph),
+                         y0 + amp * math.cos(t * 0.55 + ph * 1.3))
+    return wob
+
+
+def _graph_sidebar(state, st, t, width, height):
+    """The right pane IS the graph: the whole knowledge graph drawn live — every
+    node softly drifting, edges between them — with a numbered legend naming each
+    one. Reads cached layout, so the per-frame path stays cheap."""
     a, dim = st.a, st.dim
-    if not ego or not ego.get("focal"):
-        return ["  " + dim("no links yet — connect two"),
-                "  " + dim("entities:  link <a> <b>")]
-    focal = ego["focal"]
-    ftitle = (focal.get("title") or focal.get("key") or "").split("/")[-1]
-    edges = ego.get("edges", [])
-    out = ["  " + tui._dotfor(focal) + " " + a(_clip(ftitle, width - 4))]
-    if not edges:
-        out.append("  " + dim("· nothing connected yet"))
-        return out
-    out.append("  " + dim("│"))                                  # trunk
-    shown = edges[:8]
-    for i, ed in enumerate(shown):
-        last = i == len(shown) - 1 and len(edges) <= 8
-        node = ed.get("node") or {}
-        name = (node.get("title") or node.get("key") or "").split("/")[-1]
-        rel = ed.get("rel") or ""
-        branch = "└──" if last else "├──"
-        line = "  " + dim(branch) + tui._dotfor(node) + " " + a(_clip(name, width - 11))
-        if rel:
-            line += " " + dim("· " + _clip(rel, 8))
-        out.append(line)
-    if len(edges) > 8:
-        out.append("  " + dim(f"└── +{len(edges) - 8} more"))
-    return out
+    nodes = state.get("mapnodes") or []
+    edges = state.get("mapedges") or []
+    npos = state.get("mappos") or {}
+    head = [a("  M A N I F E X A"), "", dim(f"  ── graph · {state.get('vault', '')} ──")]
+    if not nodes or not npos:
+        return "\n".join(head + ["", dim("  nothing to draw yet —"), "",
+                                 dim("  add a paper:   add <doi>"),
+                                 dim('  add a topic:   add topic "…"'),
+                                 dim("  connect them:  link <a> <b>")])
+    legend_n = min(len(nodes), max(3, height - 12))
+    map_h = max(6, height - len(head) - legend_n - 3)
+    body = tui._map_draw(nodes, edges, _wobble(nodes, npos, t), st, max(20, width - 2), map_h, legend=False)
+    L = head + [""] + ["  " + ln for ln in body.splitlines()]
+    L.append(dim(f"  ── {len(nodes)} nodes · {len(edges)} edges ──"))
+    for i, n in enumerate(nodes[:legend_n], 1):
+        L.append(f"  {dim(str(i).rjust(2))} {tui._dotfor(n)} {a(_clip(n.get('title') or n['key'], width - 7))}")
+    if len(nodes) > legend_n:
+        L.append(dim(f"     +{len(nodes) - legend_n} more"))
+    return "\n".join(L)
 
 
 def _refresh_context(app, state):
-    """Recompute the sidebar's live data — graph counts + the focused entity's
-    hidden connections. Called once per command, never in the per-frame animation
-    path, so the spinning art stays cheap."""
+    """Recompute the sidebar's data once per command (never per frame): graph
+    counts + the cached whole-graph layout the live view animates from."""
     d = app.export()
     nodes, edges = d.get("nodes", []), d.get("edges", [])
     ents = app.list()
@@ -166,117 +153,11 @@ def _refresh_context(app, state):
     for e in ents:
         by[e.type or "note"] = by.get(e.type or "note", 0) + 1
     state["by_type"] = by
-    focus = state.get("current")
-    try:
-        state["around"] = app.around(focus)[:4] if focus else []
-    except Exception:
-        state["around"] = []
-
-    # ego-net for the sidebar graph view — the focal node's direct edges, built
-    # from the export we already fetched (no extra engine calls in the render
-    # path). No focus → default to the busiest node so there's always a picture.
-    node_by = {n["key"]: n for n in nodes}
-    deg: dict = {}
-    for e in edges:
-        deg[e["src"]] = deg.get(e["src"], 0) + 1
-        deg[e["dst"]] = deg.get(e["dst"], 0) + 1
-    focal_key = focus if (focus and focus in node_by) else (max(deg, key=deg.get) if deg else None)
-    ego = None
-    if focal_key and focal_key in node_by:
-        nbrs = []
-        for e in edges:
-            other = e["dst"] if e["src"] == focal_key else (e["src"] if e["dst"] == focal_key else None)
-            if other is not None:
-                nbrs.append({"rel": e.get("rel", ""), "node": node_by.get(other, {"key": other})})
-        ego = {"focal": node_by[focal_key], "edges": nbrs,
-               "degree": deg.get(focal_key, 0), "auto": not (focus and focus in node_by)}
-    state["ego"] = ego
-
-    # cache the whole-graph layout for the animated `map` view (computed once per
-    # command here, never in the per-frame render path).
     try:
         state["mappos"] = tui._map_positions(nodes, edges) if nodes else {}
     except Exception:
         state["mappos"] = {}
     state["mapnodes"], state["mapedges"] = nodes, edges
-
-
-def _map_frame(state, st, t, width=60, height=18):
-    """One frame of the live whole-graph view: every node softly orbiting its
-    settled position (low-key, deterministic in ``t``), edges following, a
-    numbered legend beneath. Reads cached layout — no engine work per frame."""
-    nodes = state.get("mapnodes") or []
-    npos = state.get("mappos") or {}
-    if not nodes or not npos:
-        return st.dim("  empty graph — add or create something, then  map")
-    amp = 0.035                                           # gentle drift amplitude
-    wob = {}
-    for i, n in enumerate(nodes):
-        x0, y0 = npos.get(n["key"], (0.5, 0.5))
-        ph = i * 1.7
-        wob[n["key"]] = (x0 + amp * math.sin(t * 0.7 + ph),
-                         y0 + amp * math.cos(t * 0.55 + ph * 1.3))
-    body = tui._map_draw(nodes, state.get("mapedges") or [], wob, st, width, height, legend=True)
-    return st.dim("  ⟲ live graph · type a command or Esc to exit") + "\n" + body
-
-
-def _sidebar_text(app, state, art, st) -> str:
-    """The right pane: a live context + discovery surface. Compact art header,
-    then the current focus + graph size, the focused entity's hidden connections
-    (surfaced automatically), what to do next, then recent — reference last."""
-    a, dim = st.a, st.dim
-    focus = state.get("current")
-    counts = state.get("counts") or {}
-    short = (focus.split("/")[-1] if focus else "")
-
-    L = [a(ln) for ln in art.splitlines()]
-    L += ["", a("  M A N I F E X A"), ""]
-
-    # graph view first — so "what connects to what" is visible immediately, even
-    # on short terminals. A node-link diagram of the focus (or the busiest node),
-    # then the same edges as a labelled list beneath it.
-    ego = state.get("ego")
-    if ego and ego.get("auto"):
-        L.append(dim("  ── connections · busiest ──"))
-    else:
-        L.append(dim(f"  ── connections · {short} ──" if short else "  ── connections ──"))
-    L += _ego_lines(ego, st)
-    L.append(dim("  → type  map  for the whole graph"))
-    L.append("")
-
-    L.append(dim(f"  ▤ vault · {state.get('vault', '')}"))
-    L.append(dim("  " + state.get("home", "")))
-    by = state.get("by_type") or {}
-    mx = max(by.values()) if by else 1
-    for t in [x for x in tui.TYPES if by.get(x)] + [x for x in by if x not in tui.TYPES]:
-        L.append("  " + tui.DOT.get(t, "·") + " " + tui._pad(t, 7) + " " + a(tui.hbar(by[t], mx, 8)) + " " + str(by[t]))
-    L.append("  " + dim(f"{counts.get('curated', 0)} curated · {counts.get('edges', 0)} edges · {state.get('engine', '')}"))
-
-    # hidden links — one hop further out (shared neighbours, not yet connected)
-    L.append("")
-    L.append(dim(f"  ── hidden · {short} ──" if focus else "  ── hidden links ──"))
-    around = state.get("around") or []
-    if not focus:
-        L += ["  " + dim("open an entity to see"), "  " + dim("what it sits near")]
-    elif not around:
-        L += ["  " + dim("none yet — enrich or"), "  " + dim("expand this node")]
-    else:
-        for r in around[:3]:
-            title = (r.get("title") or r["key"]).split("/")[-1][:13]
-            L.append("  ▸ " + a(title) + " " + dim((r.get("reason") or "")[:8]))
-
-    L.append("")
-    L.append(dim("  ── do next ──"))
-    for cmd, _desc in suggestions(app, focus)[:4]:
-        L.append("  " + a("› " + cmd))
-
-    if state.get("recent"):
-        L.append("")
-        L.append(dim("  ── recent ──"))
-        L.append("  " + dim(" · ".join(r.split("/")[-1] for r in state["recent"][-3:])))
-
-    L += ["", dim("  /help · /manual · /color · /spin")]
-    return "\n".join(L)
 
 
 def _process(app, text, transcript, state, st):
@@ -295,15 +176,9 @@ def _process(app, text, transcript, state, st):
     if head == "clear":
         transcript.clear()
         return None
-    if head in ("map", "network") or (head == "graph" and len(parts) == 1):
-        state["view"] = "graph"                          # take over the main pane with the live graph
-        transcript.append(st.dim("live graph — nodes drifting; type any command or Esc to return"))
-        return None
-    if state.get("view") == "graph":
-        state["view"] = "transcript"                     # any other input leaves the live view
     if head in ("spin", "still", "animate"):
         state["animate"] = head != "still"
-        transcript.append(st.dim("animation " + ("on — Möbius spinning →" if state["animate"] else "off")))
+        transcript.append(st.dim("graph " + ("drifting →" if state["animate"] else "frozen")))
         return None
     if head in ("phosphor", "color", "colour"):
         key = tui._ph_key(parts[1] if len(parts) > 1 else "")
@@ -356,9 +231,7 @@ def build(app):
         "current": None,
         "recent": [],
         "animate": True,
-        "view": "transcript",
         "counts": {},
-        "around": [],
         "engine": type(app.engine).__name__.replace("Engine", "").lower(),
         "home": str(app.home).replace(str(Path.home()), "~"),
     }
@@ -401,11 +274,7 @@ def build(app):
                           multiline=False, accept_handler=on_accept)
 
     def get_output():
-        size = get_app().output.get_size()
-        rows, cols = size.rows, size.columns
-        if state.get("view") == "graph":                  # live whole-graph animation
-            return ANSI(_map_frame(state, st, time.monotonic(),
-                                   max(30, int(cols * 0.60) - 2), max(8, rows - 2)))
+        rows = get_app().output.get_size().rows
         avail = max(1, rows - 3)
         return ANSI("\n".join(transcript[-avail:]))
 
@@ -414,19 +283,21 @@ def build(app):
         return ANSI(st.dim(f"── manifexa · {len(app.list())} curated · {state['home']} · {state['engine']}/{phos} " + "─" * 400))
 
     def get_sidebar():
-        # compact fixed 9x26 header (rstrip=False) → the block never changes size,
-        # so the live context/discovery below it stays put while the art spins.
-        B = time.monotonic() * 0.8 if state.get("animate") else 1.2
-        art = tui.mobius_frame(0.7, B, 9, 26, rstrip=False)
-        return ANSI(_sidebar_text(app, state, art, st))
+        # the right pane IS the graph — the whole thing, live. Sized to the pane
+        # (~40% of the terminal), animated from the frame clock unless frozen.
+        size = get_app().output.get_size()
+        w = max(24, int(size.columns * 0.4) - 2)
+        h = max(10, size.rows - 1)
+        t = time.monotonic() if state.get("animate") else 1.2
+        return ANSI(_graph_sidebar(state, st, t, w, h))
 
     input_window = Window(BufferControl(buffer=input_buffer), height=1)
     left = HSplit([
         Window(FormattedTextControl(get_output), wrap_lines=True),
         Window(FormattedTextControl(get_status), height=1),
         VSplit([Window(FormattedTextControl(lambda: ANSI(st.a("› "))), width=2), input_window]),
-    ], width=D(weight=2))
-    right = Window(FormattedTextControl(get_sidebar), wrap_lines=False, width=D(weight=1))
+    ], width=D(weight=3))
+    right = Window(FormattedTextControl(get_sidebar), wrap_lines=False, width=D(weight=2))
     body = VSplit([left, Window(width=1, char="│"), right])
     root = FloatContainer(content=body,
                           floats=[Float(xcursor=True, ycursor=True,
@@ -439,13 +310,9 @@ def build(app):
     def _(event):
         event.app.exit()
 
-    @kb.add("escape")
-    def _(event):                                         # leave the live graph view
-        state["view"] = "transcript"
-
     return Application(layout=Layout(root, focused_element=input_window),
                        key_bindings=kb, full_screen=True, mouse_support=False,
-                       refresh_interval=0.12)                 # ~8 fps → the sidebar torus animates
+                       refresh_interval=0.12)                 # ~8 fps → the graph drifts live
 
 
 def run(app) -> None:
