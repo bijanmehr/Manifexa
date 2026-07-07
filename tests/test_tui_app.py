@@ -47,27 +47,25 @@ def _graph_state(tmp_path, monkeypatch):
     return state
 
 
-def test_graph_sidebar_draws_the_graph_with_a_legend(tmp_path, monkeypatch):
+def test_graph_sidebar_draws_the_graph_with_named_nodes(tmp_path, monkeypatch):
     state = _graph_state(tmp_path, monkeypatch)
-    txt = tui_app._graph_sidebar(state, tui.Style(False), 0.0, width=40, height=24)
+    txt = tui_app._graph_sidebar(state, tui.Style(False), width=44, height=24)
     assert "graph" in txt.lower()                              # the header
-    assert "On Heat" in txt and "Thermodynamics" in txt        # every node named in the legend
+    assert "On Heat" in txt and "Thermodynamics" in txt        # nodes labelled by NAME, inline
     assert "nodes" in txt.lower() and "edges" in txt.lower()   # the count line
 
 
-def test_graph_sidebar_animates_over_time(tmp_path, monkeypatch):
+def test_graph_sidebar_is_static(tmp_path, monkeypatch):
     state = _graph_state(tmp_path, monkeypatch)
-    st = tui.Style(False)
-    f0 = tui_app._graph_sidebar(state, st, 0.0, width=40, height=24)
-    f1 = tui_app._graph_sidebar(state, st, 2.0, width=40, height=24)
-    assert f0 != f1                                            # nodes drift → frames differ
+    st = tui.Style(False)                                      # no time arg → deterministic, no animation
+    assert tui_app._graph_sidebar(state, st, 44, 24) == tui_app._graph_sidebar(state, st, 44, 24)
 
 
 def test_graph_sidebar_empty_prompts_to_add(tmp_path, monkeypatch):
     monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
     state = {"vault": "v"}
     tui_app._refresh_context(App(str(tmp_path)), state)
-    txt = tui_app._graph_sidebar(state, tui.Style(False), 0.0, width=40, height=24)
+    txt = tui_app._graph_sidebar(state, tui.Style(False), width=44, height=24)
     assert "add" in txt.lower()                                # guidance when there's nothing to draw
 
 

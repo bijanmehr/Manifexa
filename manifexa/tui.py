@@ -542,15 +542,20 @@ def _map_positions(nodes, edges) -> dict:
                 (p[1] - miny) / ((maxy - miny) or 1)) for k, p in pos.items()}
 
 
-def _map_draw(nodes, edges, npos, st, width, height, legend=True) -> str:
+def _map_name(n) -> str:
+    name = (n.get("title") or n.get("key") or "").split("/")[-1]
+    return name if len(name) <= 18 else name[:17] + "…"
+
+
+def _map_draw(nodes, edges, npos, st, width, height) -> str:
     """Draw the graph from normalised positions ``npos`` onto a width×height
-    canvas — edges as lines, nodes as glyph+index, an optional numbered legend.
-    Shared by the static ``map`` and the animated live view."""
-    a, dim = st.a, st.dim
+    canvas — edges as lines, each node labelled inline with its glyph + name
+    (not a code). Shared by the ``map`` command and the sidebar."""
+    a = st.a
 
     def cell(k):
         x01, y01 = npos.get(k, (0.5, 0.5))
-        x = 2 + int(max(0.0, min(1.0, x01)) * (width - 8))
+        x = 2 + int(max(0.0, min(1.0, x01)) * (width - 6))
         y = 1 + int(max(0.0, min(1.0, y01)) * (height - 2))
         return max(0, min(width - 3, x)), max(0, min(height - 1, y))
 
@@ -567,24 +572,23 @@ def _map_draw(nodes, edges, npos, st, width, height, legend=True) -> str:
         if e["src"] in cells and e["dst"] in cells:
             (x0, y0), (x1, y1) = cells[e["src"]], cells[e["dst"]]
             _draw_edge(grid, x0, y0, x1, y1)
-    for i, n in enumerate(nodes, 1):
+    for n in nodes:                                        # glyph + name, over the edges
         x, y = cells[n["key"]]
-        for j, ch in enumerate(_dotfor(n) + str(i)):
-            if 0 <= x + j < width and 0 <= y < height:
-                grid[y][x + j] = ch
+        icon, name = _dotfor(n), _map_name(n)
+        if x > width * 0.55:                               # right half → grow the label leftward
+            label = name + " " + icon
+            start = max(0, x - len(label) + 1)
+        else:                                              # left half → grow it rightward
+            label, start = icon + " " + name, x
+        for j, ch in enumerate(label):
+            if 0 <= start + j < width and 0 <= y < height:
+                grid[y][start + j] = ch
+    return "\n".join(a("".join(r).rstrip()) for r in grid)
 
-    body = "\n".join(a("".join(r).rstrip()) for r in grid)
-    if not legend:
-        return body
-    leg = [dim(f"  ── {len(nodes)} nodes · {len(edges)} edges ──")]
-    for i, n in enumerate(nodes, 1):
-        leg.append(f"  {dim(str(i).rjust(2))} {_dotfor(n)} {a(_pad(n.get('title') or n['key'], 30))} {dim(n.get('type') or '')}")
-    return body + "\n" + "\n".join(leg)
 
-
-def _render_map(app, st, width=72, height=20):
+def _render_map(app, st, width=84, height=22):
     """The whole graph as one ASCII node-link map: every node placed by a
-    force-directed layout, edges between them, a numbered legend below."""
+    force-directed layout, labelled with its name, edges between them."""
     d = app.export()
     nodes, edges = d.get("nodes", []), d.get("edges", [])
     if not nodes:
@@ -592,7 +596,8 @@ def _render_map(app, st, width=72, height=20):
     if len(nodes) > 60:
         return st.dim(f"{len(nodes)} nodes is too many to draw clearly — narrow it with  "
                       f"search <term>  or focus one with  graph <id>")
-    return _map_draw(nodes, edges, _map_positions(nodes, edges), st, width, height)
+    body = _map_draw(nodes, edges, _map_positions(nodes, edges), st, width, height)
+    return body + "\n" + st.dim(f"  {len(nodes)} nodes · {len(edges)} edges")
 
 
 def _render_graph(app, eid, st):

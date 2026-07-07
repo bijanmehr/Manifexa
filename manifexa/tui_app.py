@@ -16,9 +16,7 @@ installed (or there's no real terminal), ``run()`` falls back to ``tui.repl``.
 """
 from __future__ import annotations
 
-import math
 import sys
-import time
 from pathlib import Path
 
 from . import tui
@@ -41,10 +39,9 @@ SLASH = [
     ("/tree", "list the vault files"),
     ("/summary", "overview of the whole vault"),
     ("/ask", "LLM natural-language search"),
-    ("/spin", "toggle 3D animation"),
     ("/ls", "list curated entities"),
     ("/around", "hidden connections <id>"),
-    ("/map", "whole-graph map — all nodes"),
+    ("/map", "whole-graph map — all nodes, named"),
     ("/graph", "one node's ego-net <id>"),
     ("/bridges", "connectors by betweenness"),
     ("/clusters", "emerging communities"),
@@ -67,7 +64,7 @@ _TYPES = tui.TYPES
 _CMDS = ("help", "manual", "ls", "open", "inspect", "around", "path", "bridges", "clusters",
          "similar", "stats", "graph", "map", "search", "add", "new", "link", "promote", "remove",
          "note", "extract", "expand", "complete", "ask", "embed", "export",
-         "import", "vault", "tree", "summary", "color", "spin", "about", "clear", "quit", "exit")
+         "import", "vault", "tree", "summary", "color", "about", "clear", "quit", "exit")
 
 
 def _complete(app, text):
@@ -94,53 +91,28 @@ def _complete(app, text):
     return []
 
 
-def _clip(s, n):
-    s = str(s)
-    return s if len(s) <= n else s[: max(1, n - 1)] + "…"
-
-
-def _wobble(nodes, npos, t, amp=0.035):
-    """Gently orbit each node around its settled position — a low-key, fully
-    deterministic drift (a function of the frame time ``t`` and the node index),
-    so the graph is alive without jumping around."""
-    wob = {}
-    for i, n in enumerate(nodes):
-        x0, y0 = npos.get(n["key"], (0.5, 0.5))
-        ph = i * 1.7
-        wob[n["key"]] = (x0 + amp * math.sin(t * 0.7 + ph),
-                         y0 + amp * math.cos(t * 0.55 + ph * 1.3))
-    return wob
-
-
-def _graph_sidebar(state, st, t, width, height):
-    """The right pane IS the graph: the whole knowledge graph drawn live — every
-    node softly drifting, edges between them — with a numbered legend naming each
-    one. Reads cached layout, so the per-frame path stays cheap."""
+def _graph_sidebar(state, st, width, height):
+    """The right pane IS the graph: the whole knowledge graph drawn statically —
+    every node labelled with its name, edges between them. No animation."""
     a, dim = st.a, st.dim
     nodes = state.get("mapnodes") or []
     edges = state.get("mapedges") or []
     npos = state.get("mappos") or {}
-    head = [a("  M A N I F E X A"), "", dim(f"  ── graph · {state.get('vault', '')} ──")]
+    head = [a("  M A N I F E X A"), "", dim(f"  ── graph · {state.get('vault', '')} ──"), ""]
     if not nodes or not npos:
-        return "\n".join(head + ["", dim("  nothing to draw yet —"), "",
+        return "\n".join(head + [dim("  nothing to draw yet —"), "",
                                  dim("  add a paper:   add <doi>"),
                                  dim('  add a topic:   add topic "…"'),
                                  dim("  connect them:  link <a> <b>")])
-    legend_n = min(len(nodes), max(3, height - 12))
-    map_h = max(6, height - len(head) - legend_n - 3)
-    body = tui._map_draw(nodes, edges, _wobble(nodes, npos, t), st, max(20, width - 2), map_h, legend=False)
-    L = head + [""] + ["  " + ln for ln in body.splitlines()]
+    body = tui._map_draw(nodes, edges, npos, st, max(20, width - 2), max(8, height - len(head) - 2))
+    L = head + ["  " + ln for ln in body.splitlines()]
     L.append(dim(f"  ── {len(nodes)} nodes · {len(edges)} edges ──"))
-    for i, n in enumerate(nodes[:legend_n], 1):
-        L.append(f"  {dim(str(i).rjust(2))} {tui._dotfor(n)} {a(_clip(n.get('title') or n['key'], width - 7))}")
-    if len(nodes) > legend_n:
-        L.append(dim(f"     +{len(nodes) - legend_n} more"))
     return "\n".join(L)
 
 
 def _refresh_context(app, state):
-    """Recompute the sidebar's data once per command (never per frame): graph
-    counts + the cached whole-graph layout the live view animates from."""
+    """Recompute the sidebar's data once per command: graph counts + the cached
+    whole-graph layout the static map is drawn from."""
     d = app.export()
     nodes, edges = d.get("nodes", []), d.get("edges", [])
     ents = app.list()
@@ -175,10 +147,6 @@ def _process(app, text, transcript, state, st):
         return "EXIT"
     if head == "clear":
         transcript.clear()
-        return None
-    if head in ("spin", "still", "animate"):
-        state["animate"] = head != "still"
-        transcript.append(st.dim("graph " + ("drifting →" if state["animate"] else "frozen")))
         return None
     if head in ("phosphor", "color", "colour"):
         key = tui._ph_key(parts[1] if len(parts) > 1 else "")
@@ -230,7 +198,6 @@ def build(app):
     state = {
         "current": None,
         "recent": [],
-        "animate": True,
         "counts": {},
         "engine": type(app.engine).__name__.replace("Engine", "").lower(),
         "home": str(app.home).replace(str(Path.home()), "~"),
@@ -283,13 +250,12 @@ def build(app):
         return ANSI(st.dim(f"── manifexa · {len(app.list())} curated · {state['home']} · {state['engine']}/{phos} " + "─" * 400))
 
     def get_sidebar():
-        # the right pane IS the graph — the whole thing, live. Sized to the pane
-        # (~40% of the terminal), animated from the frame clock unless frozen.
+        # the right pane IS the graph — the whole thing, static, sized to the
+        # pane (~40% of the terminal). Redraws on each command, not on a clock.
         size = get_app().output.get_size()
         w = max(24, int(size.columns * 0.4) - 2)
         h = max(10, size.rows - 1)
-        t = time.monotonic() if state.get("animate") else 1.2
-        return ANSI(_graph_sidebar(state, st, t, w, h))
+        return ANSI(_graph_sidebar(state, st, w, h))
 
     input_window = Window(BufferControl(buffer=input_buffer), height=1)
     left = HSplit([
@@ -311,8 +277,7 @@ def build(app):
         event.app.exit()
 
     return Application(layout=Layout(root, focused_element=input_window),
-                       key_bindings=kb, full_screen=True, mouse_support=False,
-                       refresh_interval=0.12)                 # ~8 fps → the graph drifts live
+                       key_bindings=kb, full_screen=True, mouse_support=False)   # static; redraw on events
 
 
 def run(app) -> None:
