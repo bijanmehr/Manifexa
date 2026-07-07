@@ -214,5 +214,6 @@ def test_sidebar_renders_the_graph_view(tmp_path, monkeypatch):
     state = {"current": p, "recent": [], "engine": "networkx", "home": "~"}
     tui_app._refresh_context(a, state)
     txt = tui_app._sidebar_text(a, state, tui.ART, tui.Style(False))
-    assert "graph" in txt.lower()                            # the graph-view section header
+    assert "connections" in txt.lower()                      # the sidebar's local-links header
+    assert "map" in txt.lower()                              # pointer to the whole-graph view
     assert "Thermodynamics" in txt                           # the connected node shows in it

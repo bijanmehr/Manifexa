@@ -237,10 +237,11 @@ def _sidebar_text(app, state, art, st) -> str:
     # then the same edges as a labelled list beneath it.
     ego = state.get("ego")
     if ego and ego.get("auto"):
-        L.append(dim("  ── graph · busiest node ──"))
+        L.append(dim("  ── connections · busiest ──"))
     else:
-        L.append(dim(f"  ── graph · {short} ──" if short else "  ── graph ──"))
+        L.append(dim(f"  ── connections · {short} ──" if short else "  ── connections ──"))
     L += _ego_lines(ego, st)
+    L.append(dim("  → type  map  for the whole graph"))
     L.append("")
 
     L.append(dim(f"  ▤ vault · {state.get('vault', '')}"))
