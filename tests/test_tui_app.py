@@ -35,18 +35,24 @@ def test_refresh_context_computes_counts(tmp_path, monkeypatch):
     assert state["by_type"].get("person") == 1
 
 
-def test_context_panel_is_minimal_and_has_no_graph(tmp_path, monkeypatch):
+def test_files_panel_lists_the_vault_by_type(tmp_path, monkeypatch):
     monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
     a = _app(tmp_path)                        # person Ada
     a.create("paper", "On Heat")
     state = {"current": "person/ada-lovelace", "vault": "v"}
     tui_app._refresh_context(a, state)
-    txt = tui_app._context_panel(state, tui.Style(False), 30, 24)
-    assert "MANIFEXA" in txt.replace(" ", "")
-    assert "person" in txt and "paper" in txt                 # counts by type
-    assert "entities" in txt.lower()
-    assert "ada-lovelace" in txt                              # the open node
-    assert "map" in txt.lower()                               # pointer to the graph command
+    txt = tui_app._files_panel(state, tui.Style(False), 30, 24)
+    assert "person" in txt and "paper" in txt                 # type "folders"
+    assert "Ada Lovelace" in txt and "On Heat" in txt         # the actual files, by title
+    assert "files" in txt.lower()
+
+
+def test_files_panel_empty_vault_prompts_to_add(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
+    state = {"vault": "v"}
+    tui_app._refresh_context(App(str(tmp_path)), state)
+    txt = tui_app._files_panel(state, tui.Style(False), 30, 24)
+    assert "empty" in txt.lower() and "add" in txt.lower()
 
 
 def test_quit_aliases_all_signal_exit(tmp_path):

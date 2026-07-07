@@ -105,27 +105,34 @@ def _refresh_context(app, state):
     for e in ents:
         by[e.type or "note"] = by.get(e.type or "note", 0) + 1
     state["by_type"] = by
+    groups: dict = {}
+    for e in sorted(ents, key=lambda e: (e.title or e.id).lower()):
+        groups.setdefault(e.type or "note", []).append({"id": e.id, "title": e.title or e.id.split("/")[-1]})
+    state["files"] = groups
 
 
-def _context_panel(state, st, width, height):
-    """A calm, minimal right pane: where you are — vault, counts by type, the
-    open node — and two pointers. The graph itself lives in the `map` command,
-    not here."""
+def _files_panel(state, st, width, height):
+    """The right pane: a file browser of the vault — curated entities grouped by
+    type, like folders. The open node is highlighted. The graph is the `map`
+    command; this is 'what's on disk'."""
     a, dim = st.a, st.dim
-    counts = state.get("counts") or {}
-    by = state.get("by_type") or {}
-    L = [a("  M A N I F E X A"), "",
-         dim(f"  ▤ {state.get('vault', 'vault')}"),
-         dim("  " + state.get("home", "")), "",
-         dim(f"  {counts.get('curated', 0)} entities · {counts.get('edges', 0)} edges")]
-    mx = max(by.values()) if by else 1
-    for t in [x for x in tui.TYPES if by.get(x)] + [x for x in by if x not in tui.TYPES]:
-        L.append("  " + tui.DOT.get(t, "·") + " " + tui._pad(t, 8) + " " + a(tui.hbar(by[t], mx, 8)) + " " + str(by[t]))
+    groups = state.get("files") or {}
     cur = state.get("current")
-    L += ["", dim("  ── you are here ──"),
-          ("  " + a(tui._clip(cur.split("/")[-1], max(8, width - 3)))) if cur
-          else dim("  (nothing open — inspect <id>)")]
-    L += ["", dim("  map    the whole graph"), dim("  help   all commands")]
+    L = [a("  M A N I F E X A"), "", a(f"  ▤ {state.get('vault', 'vault')}/")]
+    if not groups:
+        return "\n".join(L + ["", dim("  empty vault —"), dim("  add <doi>"), dim('  add topic "…"')])
+    order = [t for t in tui.TYPES if t in groups] + [t for t in groups if t not in tui.TYPES]
+    per = max(3, (height - len(L) - len(order) - 3) // max(1, len(order)))    # rows/group to fit height
+    for t in order:
+        items = groups[t]
+        L.append(f"  {tui.DOT.get(t, '·')} {a(t)}/ {dim(str(len(items)))}")
+        for i, e in enumerate(items[:per]):
+            branch = "└" if i == min(len(items), per) - 1 else "├"
+            name = tui._clip(e["title"], max(6, width - 7))
+            L.append(f"    {dim(branch)} " + (a(name) if e["id"] == cur else name))
+        if len(items) > per:
+            L.append(dim(f"      +{len(items) - per} more"))
+    L += ["", dim(f"  {sum(len(v) for v in groups.values())} files · map = graph")]
     return "\n".join(L)
 
 
@@ -247,9 +254,9 @@ def build(app):
         return ANSI(st.dim(f"── manifexa · {len(app.list())} curated · {state['home']} · {state['engine']}/{phos} " + "─" * 400))
 
     def get_sidebar():
-        # a calm, minimal context pane (no graph — that's the `map` command).
+        # the right pane is a file browser of the vault (no graph — that's `map`).
         size = get_app().output.get_size()
-        return ANSI(_context_panel(state, st, max(20, int(size.columns * 0.28) - 2), max(10, size.rows - 1)))
+        return ANSI(_files_panel(state, st, max(20, int(size.columns * 0.3) - 2), max(10, size.rows - 1)))
 
     input_window = Window(BufferControl(buffer=input_buffer), height=1)
     left = HSplit([
