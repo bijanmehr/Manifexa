@@ -44,6 +44,23 @@ def test_graph_renders_focal_even_without_edges(tmp_path):
     assert "Ada Lovelace" in out
 
 
+def test_graph_no_arg_maps_the_whole_graph(tmp_path):
+    app = App(str(tmp_path))
+    p = app.create("paper", "On Heat")
+    t = app.create("topic", "Thermodynamics")
+    c = app.create("concept", "Entropy")
+    app.link(p, t, "about")
+    app.link(p, c, "about")
+    out = dispatch(app, "graph")                       # no id → the whole-graph map
+    for name in ("On Heat", "Thermodynamics", "Entropy"):
+        assert name in out                             # every node labelled in the legend
+    assert "nodes" in out.lower() and "edges" in out.lower()
+
+
+def test_map_on_empty_graph_is_friendly(tmp_path):
+    assert "empty" in dispatch(App(str(tmp_path)), "map").lower()
+
+
 def test_help_lists_core_commands(tmp_path):
     out = dispatch(_app(tmp_path), "help")
     for c in ("open", "around", "bridges", "stats", "graph"):

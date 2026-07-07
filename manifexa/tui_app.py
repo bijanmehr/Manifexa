@@ -43,7 +43,8 @@ SLASH = [
     ("/spin", "toggle 3D animation"),
     ("/ls", "list curated entities"),
     ("/around", "hidden connections <id>"),
-    ("/graph", "ascii ego-net <id>"),
+    ("/map", "whole-graph map — all nodes"),
+    ("/graph", "one node's ego-net <id>"),
     ("/bridges", "connectors by betweenness"),
     ("/clusters", "emerging communities"),
     ("/similar", "semantic neighbours <id>"),
@@ -63,7 +64,7 @@ _COMPLETE_IDS = ("open", "inspect", "around", "graph", "similar", "promote", "re
                  "path", "expand", "complete", "link", "connect")
 _TYPES = tui.TYPES
 _CMDS = ("help", "manual", "ls", "open", "inspect", "around", "path", "bridges", "clusters",
-         "similar", "stats", "graph", "search", "add", "new", "link", "promote", "remove",
+         "similar", "stats", "graph", "map", "search", "add", "new", "link", "promote", "remove",
          "note", "extract", "expand", "complete", "ask", "embed", "export",
          "import", "vault", "tree", "summary", "color", "spin", "about", "clear", "quit", "exit")
 

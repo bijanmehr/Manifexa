@@ -200,8 +200,9 @@ HELP = """COMMANDS
   clusters               emerging communities
   similar <id>           semantic neighbours (needs: embed)
   stats                  system status dashboard
-  graph <id>             ascii ego-net
+  graph [id]             one node's ego-net · no id → whole map
   search <term>          filter your graph
+  map                    whole-graph map — every node + connection
   add <type> <title>     create an entity by hand (same as: new)
   add <doi|openalex>     …or seed a paper + enrich from the web
   new <type> <title>     create an entity by hand
@@ -248,7 +249,8 @@ _MANUAL_SECTIONS = (
         ("path <a> <b>", "the chain linking two entities"),
         ("bridges · clusters", "connectors · emerging communities"),
         ("similar <id>", "semantic neighbours (needs: embed)"),
-        ("graph <id> · stats · search", "ego-net · dashboard · filter"),
+        ("map · graph <id>", "whole-graph map · one node's ego-net"),
+        ("stats · search", "dashboard · filter"),
         ("summary · tree", "overview of everything · file tree"),
     )),
     ("curate", (
@@ -506,6 +508,79 @@ def _boxlines(title, d, W):
     return ["┌" + "─" * (W - 2) + "┐", "│" + inner + "│", "└" + "─" * (W - 2) + "┘"]
 
 
+def _draw_edge(grid, x0, y0, x1, y1):
+    """Plot a straight line between two cells with box-drawing chars (won't
+    overwrite anything already drawn)."""
+    dx, dy = x1 - x0, y1 - y0
+    steps = max(abs(dx), abs(dy))
+    if not steps:
+        return
+    ch = "─" if abs(dy) * 2 <= abs(dx) else "│" if abs(dx) * 2 <= abs(dy) else \
+        ("╲" if (dx > 0) == (dy > 0) else "╱")
+    for s in range(1, steps):
+        x, y = int(round(x0 + dx * s / steps)), int(round(y0 + dy * s / steps))
+        if 0 <= y < len(grid) and 0 <= x < len(grid[0]) and grid[y][x] == " ":
+            grid[y][x] = ch
+
+
+def _render_map(app, st, width=72, height=20):
+    """The whole graph as one ASCII node-link map: every node placed by a
+    force-directed layout, edges drawn between them, and a numbered legend below
+    so each marker is identifiable. Connected nodes cluster; isolated nodes sit
+    apart — so you see the whole structure at once."""
+    a, dim = st.a, st.dim
+    d = app.export()
+    nodes, edges = d.get("nodes", []), d.get("edges", [])
+    if not nodes:
+        return dim("empty graph — add or create something first")
+    if len(nodes) > 60:
+        return dim(f"{len(nodes)} nodes is too many to draw clearly — narrow it with  "
+                   f"search <term>  or focus one with  graph <id>")
+    import networkx as nx
+
+    g = nx.Graph()
+    g.add_nodes_from(n["key"] for n in nodes)
+    g.add_edges_from((e["src"], e["dst"]) for e in edges)
+    try:
+        pos = nx.spring_layout(g, seed=7, k=0.9)
+    except Exception:
+        pos = nx.circular_layout(g)
+    xs = [p[0] for p in pos.values()]
+    ys = [p[1] for p in pos.values()]
+    minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
+
+    def cell(p):
+        x = 2 + int((p[0] - minx) / ((maxx - minx) or 1) * (width - 8))
+        y = 1 + int((p[1] - miny) / ((maxy - miny) or 1) * (height - 2))
+        return x, y
+
+    cells, taken = {}, set()
+    for k in g.nodes():
+        x, y = cell(pos[k])
+        while (x, y) in taken and x < width - 5:      # nudge off exact collisions
+            x += 1
+        taken.add((x, y))
+        cells[k] = (x, y)
+
+    grid = [[" "] * width for _ in range(height)]
+    for e in edges:
+        (x0, y0), (x1, y1) = cells[e["src"]], cells[e["dst"]]
+        _draw_edge(grid, x0, y0, x1, y1)
+
+    node_by = {n["key"]: n for n in nodes}
+    for i, (k, (x, y)) in enumerate(cells.items(), 1):
+        for j, ch in enumerate(_dotfor(node_by[k]) + str(i)):     # glyph + index, over the edges
+            if 0 <= x + j < width:
+                grid[y][x + j] = ch
+
+    body = "\n".join(a("".join(r).rstrip()) for r in grid)
+    legend = [dim(f"  ── {len(nodes)} nodes · {len(edges)} edges ──")]
+    for i, k in enumerate(cells, 1):
+        n = node_by[k]
+        legend.append(f"  {dim(str(i).rjust(2))} {_dotfor(n)} {a(_pad(n.get('title') or k, 32))} {dim(n.get('type') or '')}")
+    return body + "\n" + "\n".join(legend)
+
+
 def _render_graph(app, eid, st):
     if not eid:
         return st.dim("usage: graph <id>")
@@ -595,8 +670,11 @@ def dispatch(app, line, st=None):
         return _render_path(app, a[0] if a else "", a[1] if len(a) > 1 else "", st)
     if c == "stats":
         return _render_stats(app, st)
-    if c == "graph":
-        return _render_graph(app, a[0] if a else "", st)
+    if c in ("graph", "map", "network"):
+        if a and a[0] not in ("all", "*"):
+            return _render_graph(app, a[0], st)
+        w = shutil.get_terminal_size((100, 30)).columns
+        return _render_map(app, st, width=max(44, min(int(w * 0.58), 82)))
     if c == "search":
         term = " ".join(a).lower()
         ents = [e for e in app.list() if term in (e.title or "").lower() or term in e.id.lower()]
