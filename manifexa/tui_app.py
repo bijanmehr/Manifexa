@@ -16,6 +16,7 @@ installed (or there's no real terminal), ``run()`` falls back to ``tui.repl``.
 """
 from __future__ import annotations
 
+import math
 import sys
 import time
 from pathlib import Path
@@ -272,10 +273,12 @@ def build(app):
         return ANSI(st.dim(f"── manifexa · {len(app.list())} curated · {state['home']} · {state['engine']}/{phos} " + "─" * 400))
 
     def get_sidebar():
-        # animated logo + a file browser of the vault (the graph is `map`).
+        # animated Möbius logo + a file browser of the vault (the graph is `map`).
+        # Fixed tilt + a slow rock in B keeps it reading as a strip (a full spin
+        # tumbles it edge-on into a blob), so the twist shows without a jump.
         size = get_app().output.get_size()
         w = max(18, int(size.columns * 0.22) - 2)
-        art = tui.mobius_frame(0.7, time.monotonic() * 0.8, 7, min(w, 22), rstrip=False)
+        art = tui.mobius_frame(0.5, 0.7 * math.sin(time.monotonic() * 0.4), 11, min(w, 22), rstrip=False)
         return ANSI(_files_panel(state, st, art, w, max(10, size.rows - 1)))
 
     input_window = Window(BufferControl(buffer=input_buffer), height=1)
