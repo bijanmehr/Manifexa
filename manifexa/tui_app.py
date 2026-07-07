@@ -16,6 +16,7 @@ installed (or there's no real terminal), ``run()`` falls back to ``tui.repl``.
 """
 from __future__ import annotations
 
+import math
 import sys
 import time
 from pathlib import Path
@@ -191,6 +192,33 @@ def _refresh_context(app, state):
                "degree": deg.get(focal_key, 0), "auto": not (focus and focus in node_by)}
     state["ego"] = ego
 
+    # cache the whole-graph layout for the animated `map` view (computed once per
+    # command here, never in the per-frame render path).
+    try:
+        state["mappos"] = tui._map_positions(nodes, edges) if nodes else {}
+    except Exception:
+        state["mappos"] = {}
+    state["mapnodes"], state["mapedges"] = nodes, edges
+
+
+def _map_frame(state, st, t, width=60, height=18):
+    """One frame of the live whole-graph view: every node softly orbiting its
+    settled position (low-key, deterministic in ``t``), edges following, a
+    numbered legend beneath. Reads cached layout — no engine work per frame."""
+    nodes = state.get("mapnodes") or []
+    npos = state.get("mappos") or {}
+    if not nodes or not npos:
+        return st.dim("  empty graph — add or create something, then  map")
+    amp = 0.035                                           # gentle drift amplitude
+    wob = {}
+    for i, n in enumerate(nodes):
+        x0, y0 = npos.get(n["key"], (0.5, 0.5))
+        ph = i * 1.7
+        wob[n["key"]] = (x0 + amp * math.sin(t * 0.7 + ph),
+                         y0 + amp * math.cos(t * 0.55 + ph * 1.3))
+    body = tui._map_draw(nodes, state.get("mapedges") or [], wob, st, width, height, legend=True)
+    return st.dim("  ⟲ live graph · type a command or Esc to exit") + "\n" + body
+
 
 def _sidebar_text(app, state, art, st) -> str:
     """The right pane: a live context + discovery surface. Compact art header,
@@ -266,6 +294,12 @@ def _process(app, text, transcript, state, st):
     if head == "clear":
         transcript.clear()
         return None
+    if head in ("map", "network") or (head == "graph" and len(parts) == 1):
+        state["view"] = "graph"                          # take over the main pane with the live graph
+        transcript.append(st.dim("live graph — nodes drifting; type any command or Esc to return"))
+        return None
+    if state.get("view") == "graph":
+        state["view"] = "transcript"                     # any other input leaves the live view
     if head in ("spin", "still", "animate"):
         state["animate"] = head != "still"
         transcript.append(st.dim("animation " + ("on — Möbius spinning →" if state["animate"] else "off")))
@@ -321,6 +355,7 @@ def build(app):
         "current": None,
         "recent": [],
         "animate": True,
+        "view": "transcript",
         "counts": {},
         "around": [],
         "engine": type(app.engine).__name__.replace("Engine", "").lower(),
@@ -365,7 +400,11 @@ def build(app):
                           multiline=False, accept_handler=on_accept)
 
     def get_output():
-        rows = get_app().output.get_size().rows
+        size = get_app().output.get_size()
+        rows, cols = size.rows, size.columns
+        if state.get("view") == "graph":                  # live whole-graph animation
+            return ANSI(_map_frame(state, st, time.monotonic(),
+                                   max(30, int(cols * 0.60) - 2), max(8, rows - 2)))
         avail = max(1, rows - 3)
         return ANSI("\n".join(transcript[-avail:]))
 
@@ -398,6 +437,10 @@ def build(app):
     @kb.add("c-c")
     def _(event):
         event.app.exit()
+
+    @kb.add("escape")
+    def _(event):                                         # leave the live graph view
+        state["view"] = "transcript"
 
     return Application(layout=Layout(root, focused_element=input_window),
                        key_bindings=kb, full_screen=True, mouse_support=False,

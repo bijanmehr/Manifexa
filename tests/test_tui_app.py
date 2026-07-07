@@ -53,6 +53,29 @@ def test_refresh_context_computes_counts(tmp_path):
     assert "around" in state
 
 
+def test_process_map_enters_live_graph_view_others_exit(tmp_path):
+    a = _app(tmp_path)
+    state = _state()
+    tui_app._process(a, "map", [], state, tui.Style(False))
+    assert state.get("view") == "graph"
+    tui_app._process(a, "ls", [], state, tui.Style(False))       # any other command leaves it
+    assert state.get("view") == "transcript"
+
+
+def test_map_frame_names_nodes_and_animates(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
+    a = App(str(tmp_path))
+    p = a.create("paper", "On Heat")
+    t = a.create("topic", "Thermo")
+    a.link(p, t, "about")
+    state = {"current": None, "recent": []}
+    tui_app._refresh_context(a, state)
+    f0 = tui_app._map_frame(state, tui.Style(False), 0.0, width=48, height=14)
+    f1 = tui_app._map_frame(state, tui.Style(False), 2.0, width=48, height=14)
+    assert "Thermo" in f0 and "On Heat" in f0                    # nodes named in the legend
+    assert f0 != f1                                              # frames drift over time → animated
+
+
 def test_quit_aliases_all_signal_exit(tmp_path):
     app = _app(tmp_path)
     st = tui.Style(False)

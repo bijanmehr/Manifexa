@@ -523,19 +523,9 @@ def _draw_edge(grid, x0, y0, x1, y1):
             grid[y][x] = ch
 
 
-def _render_map(app, st, width=72, height=20):
-    """The whole graph as one ASCII node-link map: every node placed by a
-    force-directed layout, edges drawn between them, and a numbered legend below
-    so each marker is identifiable. Connected nodes cluster; isolated nodes sit
-    apart — so you see the whole structure at once."""
-    a, dim = st.a, st.dim
-    d = app.export()
-    nodes, edges = d.get("nodes", []), d.get("edges", [])
-    if not nodes:
-        return dim("empty graph — add or create something first")
-    if len(nodes) > 60:
-        return dim(f"{len(nodes)} nodes is too many to draw clearly — narrow it with  "
-                   f"search <term>  or focus one with  graph <id>")
+def _map_positions(nodes, edges) -> dict:
+    """Force-directed layout of the whole graph, normalised to the unit square:
+    ``{key: (x, y)}`` with x, y in [0, 1]. Deterministic (fixed seed)."""
     import networkx as nx
 
     g = nx.Graph()
@@ -545,40 +535,64 @@ def _render_map(app, st, width=72, height=20):
         pos = nx.spring_layout(g, seed=7, k=0.9)
     except Exception:
         pos = nx.circular_layout(g)
-    xs = [p[0] for p in pos.values()]
-    ys = [p[1] for p in pos.values()]
+    xs = [p[0] for p in pos.values()] or [0.0]
+    ys = [p[1] for p in pos.values()] or [0.0]
     minx, maxx, miny, maxy = min(xs), max(xs), min(ys), max(ys)
+    return {k: ((p[0] - minx) / ((maxx - minx) or 1),
+                (p[1] - miny) / ((maxy - miny) or 1)) for k, p in pos.items()}
 
-    def cell(p):
-        x = 2 + int((p[0] - minx) / ((maxx - minx) or 1) * (width - 8))
-        y = 1 + int((p[1] - miny) / ((maxy - miny) or 1) * (height - 2))
-        return x, y
+
+def _map_draw(nodes, edges, npos, st, width, height, legend=True) -> str:
+    """Draw the graph from normalised positions ``npos`` onto a width×height
+    canvas — edges as lines, nodes as glyph+index, an optional numbered legend.
+    Shared by the static ``map`` and the animated live view."""
+    a, dim = st.a, st.dim
+
+    def cell(k):
+        x01, y01 = npos.get(k, (0.5, 0.5))
+        x = 2 + int(max(0.0, min(1.0, x01)) * (width - 8))
+        y = 1 + int(max(0.0, min(1.0, y01)) * (height - 2))
+        return max(0, min(width - 3, x)), max(0, min(height - 1, y))
 
     cells, taken = {}, set()
-    for k in g.nodes():
-        x, y = cell(pos[k])
-        while (x, y) in taken and x < width - 5:      # nudge off exact collisions
+    for n in nodes:
+        x, y = cell(n["key"])
+        while (x, y) in taken and x < width - 5:          # nudge off exact collisions
             x += 1
         taken.add((x, y))
-        cells[k] = (x, y)
+        cells[n["key"]] = (x, y)
 
     grid = [[" "] * width for _ in range(height)]
     for e in edges:
-        (x0, y0), (x1, y1) = cells[e["src"]], cells[e["dst"]]
-        _draw_edge(grid, x0, y0, x1, y1)
-
-    node_by = {n["key"]: n for n in nodes}
-    for i, (k, (x, y)) in enumerate(cells.items(), 1):
-        for j, ch in enumerate(_dotfor(node_by[k]) + str(i)):     # glyph + index, over the edges
-            if 0 <= x + j < width:
+        if e["src"] in cells and e["dst"] in cells:
+            (x0, y0), (x1, y1) = cells[e["src"]], cells[e["dst"]]
+            _draw_edge(grid, x0, y0, x1, y1)
+    for i, n in enumerate(nodes, 1):
+        x, y = cells[n["key"]]
+        for j, ch in enumerate(_dotfor(n) + str(i)):
+            if 0 <= x + j < width and 0 <= y < height:
                 grid[y][x + j] = ch
 
     body = "\n".join(a("".join(r).rstrip()) for r in grid)
-    legend = [dim(f"  ── {len(nodes)} nodes · {len(edges)} edges ──")]
-    for i, k in enumerate(cells, 1):
-        n = node_by[k]
-        legend.append(f"  {dim(str(i).rjust(2))} {_dotfor(n)} {a(_pad(n.get('title') or k, 32))} {dim(n.get('type') or '')}")
-    return body + "\n" + "\n".join(legend)
+    if not legend:
+        return body
+    leg = [dim(f"  ── {len(nodes)} nodes · {len(edges)} edges ──")]
+    for i, n in enumerate(nodes, 1):
+        leg.append(f"  {dim(str(i).rjust(2))} {_dotfor(n)} {a(_pad(n.get('title') or n['key'], 30))} {dim(n.get('type') or '')}")
+    return body + "\n" + "\n".join(leg)
+
+
+def _render_map(app, st, width=72, height=20):
+    """The whole graph as one ASCII node-link map: every node placed by a
+    force-directed layout, edges between them, a numbered legend below."""
+    d = app.export()
+    nodes, edges = d.get("nodes", []), d.get("edges", [])
+    if not nodes:
+        return st.dim("empty graph — add or create something first")
+    if len(nodes) > 60:
+        return st.dim(f"{len(nodes)} nodes is too many to draw clearly — narrow it with  "
+                      f"search <term>  or focus one with  graph <id>")
+    return _map_draw(nodes, edges, _map_positions(nodes, edges), st, width, height)
 
 
 def _render_graph(app, eid, st):
