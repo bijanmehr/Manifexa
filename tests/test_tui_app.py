@@ -35,24 +35,32 @@ def test_refresh_context_computes_counts(tmp_path, monkeypatch):
     assert state["by_type"].get("person") == 1
 
 
-def test_files_panel_lists_the_vault_by_type(tmp_path, monkeypatch):
+def test_files_panel_lists_the_vault_by_type_with_suggestions(tmp_path, monkeypatch):
     monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
     a = _app(tmp_path)                        # person Ada
     a.create("paper", "On Heat")
     state = {"current": "person/ada-lovelace", "vault": "v"}
     tui_app._refresh_context(a, state)
-    txt = tui_app._files_panel(state, tui.Style(False), 30, 24)
+    txt = tui_app._files_panel(state, tui.Style(False), "", 30, 24)   # "" = no logo art
     assert "person" in txt and "paper" in txt                 # type "folders"
     assert "Ada Lovelace" in txt and "On Heat" in txt         # the actual files, by title
-    assert "files" in txt.lower()
+    assert "suggested" in txt.lower()                         # situational suggestions section
 
 
 def test_files_panel_empty_vault_prompts_to_add(tmp_path, monkeypatch):
     monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
     state = {"vault": "v"}
     tui_app._refresh_context(App(str(tmp_path)), state)
-    txt = tui_app._files_panel(state, tui.Style(False), 30, 24)
+    txt = tui_app._files_panel(state, tui.Style(False), "", 30, 24)
     assert "empty" in txt.lower() and "add" in txt.lower()
+
+
+def test_suggestions_are_situational():
+    assert "add <doi>" in tui_app._suggestions({"counts": {"curated": 0, "edges": 0}})   # empty → seed
+    linked = tui_app._suggestions({"counts": {"curated": 5, "edges": 4}})
+    assert "map" in linked and "bridges" in linked                                       # populated → explore
+    focused = tui_app._suggestions({"counts": {"curated": 5, "edges": 4}, "current": "paper/x"})
+    assert any("expand" in s or "around" in s for s in focused)                          # node open → act on it
 
 
 def test_quit_aliases_all_signal_exit(tmp_path):

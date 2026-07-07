@@ -17,6 +17,7 @@ installed (or there's no real terminal), ``run()`` falls back to ``tui.repl``.
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 
 from . import tui
@@ -111,28 +112,45 @@ def _refresh_context(app, state):
     state["files"] = groups
 
 
-def _files_panel(state, st, width, height):
-    """The right pane: a file browser of the vault — curated entities grouped by
-    type, like folders. The open node is highlighted. The graph is the `map`
-    command; this is 'what's on disk'."""
+def _suggestions(state):
+    """A few situational next commands for the sidebar, keyed off what's in the
+    vault and what's open."""
+    c = state.get("counts") or {}
+    n, e = c.get("curated", 0), c.get("edges", 0)
+    if n == 0:
+        return ["add <doi>", 'add topic "…"', "extract"]
+    if state.get("current"):
+        return ["expand <id>", "around <id>", "link <a> <b>", "map"]
+    if e == 0:
+        return ["link <a> <b>", "add <doi>", "map"]
+    return ["map", "bridges", "clusters", "stats"]
+
+
+def _files_panel(state, st, art, width, height):
+    """The right pane: the animated logo, then a file browser of the vault
+    (entities grouped by type, open node highlighted), then situational
+    suggestions. The graph itself is the `map` command."""
     a, dim = st.a, st.dim
     groups = state.get("files") or {}
     cur = state.get("current")
-    L = [a("  M A N I F E X A"), "", a(f"  ▤ {state.get('vault', 'vault')}/")]
+    L = [a(ln) for ln in art.splitlines()]
+    L += ["", a("  M A N I F E X A"), "", a(f"  ▤ {state.get('vault', 'vault')}/")]
     if not groups:
-        return "\n".join(L + ["", dim("  empty vault —"), dim("  add <doi>"), dim('  add topic "…"')])
-    order = [t for t in tui.TYPES if t in groups] + [t for t in groups if t not in tui.TYPES]
-    per = max(3, (height - len(L) - len(order) - 3) // max(1, len(order)))    # rows/group to fit height
-    for t in order:
-        items = groups[t]
-        L.append(f"  {tui.DOT.get(t, '·')} {a(t)}/ {dim(str(len(items)))}")
-        for i, e in enumerate(items[:per]):
-            branch = "└" if i == min(len(items), per) - 1 else "├"
-            name = tui._clip(e["title"], max(6, width - 7))
-            L.append(f"    {dim(branch)} " + (a(name) if e["id"] == cur else name))
-        if len(items) > per:
-            L.append(dim(f"      +{len(items) - per} more"))
-    L += ["", dim(f"  {sum(len(v) for v in groups.values())} files · map = graph")]
+        L += ["", dim("  empty vault —"), dim("  add <doi>"), dim('  add topic "…"')]
+    else:
+        order = [t for t in tui.TYPES if t in groups] + [t for t in groups if t not in tui.TYPES]
+        for t in order:
+            items = groups[t]
+            L.append(f"  {tui.DOT.get(t, '·')} {a(t)}/ {dim(str(len(items)))}")
+            for i, e in enumerate(items[:6]):
+                branch = "└" if i == min(len(items), 6) - 1 else "├"
+                name = tui._clip(e["title"], max(6, width - 6))
+                L.append(f"   {dim(branch)} " + (a(name) if e["id"] == cur else name))
+            if len(items) > 6:
+                L.append(dim(f"     +{len(items) - 6}"))
+    L += ["", dim("  ── suggested ──")]
+    for s in _suggestions(state):
+        L.append("  " + a("› " + s))
     return "\n".join(L)
 
 
@@ -254,17 +272,19 @@ def build(app):
         return ANSI(st.dim(f"── manifexa · {len(app.list())} curated · {state['home']} · {state['engine']}/{phos} " + "─" * 400))
 
     def get_sidebar():
-        # the right pane is a file browser of the vault (no graph — that's `map`).
+        # animated logo + a file browser of the vault (the graph is `map`).
         size = get_app().output.get_size()
-        return ANSI(_files_panel(state, st, max(20, int(size.columns * 0.3) - 2), max(10, size.rows - 1)))
+        w = max(18, int(size.columns * 0.22) - 2)
+        art = tui.mobius_frame(0.7, time.monotonic() * 0.8, 7, min(w, 22), rstrip=False)
+        return ANSI(_files_panel(state, st, art, w, max(10, size.rows - 1)))
 
     input_window = Window(BufferControl(buffer=input_buffer), height=1)
     left = HSplit([
         Window(FormattedTextControl(get_output), wrap_lines=True),
         Window(FormattedTextControl(get_status), height=1),
         VSplit([Window(FormattedTextControl(lambda: ANSI(st.a("› "))), width=2), input_window]),
-    ], width=D(weight=7))
-    right = Window(FormattedTextControl(get_sidebar), wrap_lines=False, width=D(weight=3))
+    ], width=D(weight=4))
+    right = Window(FormattedTextControl(get_sidebar), wrap_lines=False, width=D(weight=1))
     body = VSplit([left, Window(width=1, char="│"), right])
     root = FloatContainer(content=body,
                           floats=[Float(xcursor=True, ycursor=True,
@@ -278,7 +298,8 @@ def build(app):
         event.app.exit()
 
     return Application(layout=Layout(root, focused_element=input_window),
-                       key_bindings=kb, full_screen=True, mouse_support=False)   # static; redraw on events
+                       key_bindings=kb, full_screen=True, mouse_support=False,
+                       refresh_interval=0.12)                 # ~8 fps → the logo animates (graph stays static)
 
 
 def run(app) -> None:
