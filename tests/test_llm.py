@@ -68,6 +68,43 @@ def test_provider_from_env_selects(monkeypatch):
     assert isinstance(provider_from_env(), AnthropicProvider)
 
 
+def test_ollama_generate_builds_a_schema_request_and_parses(monkeypatch):
+    """Lock the Ollama contract: schema → `format`, response JSON parsed back —
+    without needing a live model."""
+    import json as _json
+    import urllib.request
+
+    seen = {}
+
+    class _Resp:
+        def __init__(self, payload):
+            self._p = payload
+
+        def read(self):
+            return self._p
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        seen["url"] = req.full_url
+        seen["body"] = _json.loads(req.data.decode())
+        return _Resp(_json.dumps({"response": _json.dumps({"keys": ["a", "b"]})}).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    p = OllamaProvider(model="llama3.1", host="http://localhost:11434")
+    out = p.generate("find X", system="you rank", schema={"type": "object"})
+    assert out == {"keys": ["a", "b"]}                          # structured JSON parsed back
+    assert seen["url"].endswith("/api/generate")
+    assert seen["body"]["model"] == "llama3.1"
+    assert seen["body"]["format"] == {"type": "object"}         # the schema is passed as `format`
+    assert seen["body"]["stream"] is False
+    assert seen["body"]["system"] == "you rank"
+
+
 def test_app_wires_ask_to_the_injected_provider(tmp_path):
     from manifexa.app import App
 
