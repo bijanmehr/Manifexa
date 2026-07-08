@@ -133,6 +133,13 @@ def main(argv=None) -> int:
     elif args.cmd == "promote":
         print("promoted →", app.promote(args.key, note=args.note))
     elif args.cmd in ("shell", None):
+        from .llm.connect import ensure_llm
+
+        provider, status = ensure_llm()          # config/env → tunnel + health-check
+        if provider is not None:
+            app.llm = provider                   # offline provider errors clearly on use
+        if status:
+            print(status)
         try:
             if getattr(args, "plain", False):
                 from .tui import repl
