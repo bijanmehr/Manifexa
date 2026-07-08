@@ -61,6 +61,47 @@ def test_ask_returns_only_valid_keys_in_order():
     assert ops.ask(p, _engine(), "engine notes") == ["paper/notes", "person/ada"]
 
 
+def test_organize_groups_titled_nodes_into_themes():
+    p = FakeProvider({"summary": "About the engine.", "themes": [
+        {"label": "People", "keys": ["person/ada"]},
+        {"label": "Papers", "keys": ["paper/notes"]},
+    ]})
+    r = ops.organize(p, _engine())
+    assert r["summary"] == "About the engine."
+    assert {t["label"] for t in r["themes"]} == {"People", "Papers"}
+    assert "Ada Lovelace" in p.prompts[0]                         # titles fed to the model
+
+
+def test_organize_drops_invalid_keys_and_buckets_untitled():
+    e = NetworkXEngine()
+    e.add_node("paper/a", type="paper", title="Real Paper", status="curated")
+    e.add_node("W123", type="paper", title="", status="candidate")   # unfetched ref, no title
+    p = FakeProvider({"summary": "x", "themes": [{"label": "T", "keys": ["paper/a", "bogus"]}]})
+    r = ops.organize(p, e)
+    assert r["themes"][0]["keys"] == ["paper/a"]                  # hallucinated key dropped
+    assert "W123" in r["untitled"]                               # untitled refs bucketed separately
+
+
+def test_app_organize_uses_the_injected_provider(tmp_path):
+    from manifexa.app import App
+
+    app = App(str(tmp_path), llm=FakeProvider({"summary": "s", "themes": []}))
+    app.create("paper", "On Heat")
+    assert app.organize()["summary"] == "s"
+
+
+def test_map_ai_command_renders_summary_and_themes(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
+    from manifexa.app import App
+    from manifexa.tui import dispatch
+
+    app = App(str(tmp_path), llm=FakeProvider({"summary": "About heat.", "themes": [
+        {"label": "Thermodynamics", "keys": ["paper/on-heat"]}]}))
+    app.create("paper", "On Heat")
+    out = dispatch(app, "map ai")
+    assert "About heat." in out and "Thermodynamics" in out and "On Heat" in out
+
+
 def test_provider_from_env_selects(monkeypatch):
     monkeypatch.setenv("MANIFEXA_LLM", "ollama")
     assert isinstance(provider_from_env(), OllamaProvider)

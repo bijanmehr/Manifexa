@@ -43,6 +43,7 @@ SLASH = [
     ("/ls", "list curated entities"),
     ("/around", "hidden connections <id>"),
     ("/map", "whole-graph map — all nodes, named"),
+    ("/map ai", "LLM-organised map: themes + summary"),
     ("/graph", "one node's ego-net <id>"),
     ("/bridges", "connectors by betweenness"),
     ("/clusters", "emerging communities"),

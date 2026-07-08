@@ -32,6 +32,18 @@ _SEARCH_SCHEMA = {
     "required": ["keys"],
     "additionalProperties": False,
 }
+_ORGANIZE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "summary": {"type": "string"},
+        "themes": {"type": "array", "items": {"type": "object", "properties": {
+            "label": {"type": "string"},
+            "keys": {"type": "array", "items": {"type": "string"}}},
+            "required": ["label", "keys"], "additionalProperties": False}},
+    },
+    "required": ["summary", "themes"],
+    "additionalProperties": False,
+}
 
 
 def _title(engine, key):
@@ -92,6 +104,35 @@ def complete(provider, engine, cache, key) -> dict:
             cache.upsert_edge(s, d, ed.get("rel", "related"), source=source)
             edges += 1
     return {"edges": edges}
+
+
+def organize(provider, engine, keys=None) -> dict:
+    """LLM groups the graph's *titled* nodes into labelled themes + a one-line
+    summary — a meaningful map instead of a flat edge dump. ``keys`` limits it to
+    a neighbourhood; None themes the whole graph. Untitled refs (bare ids with no
+    title yet) are bucketed separately, and hallucinated keys are dropped."""
+    catalog = [(k, _title(engine, k)) for k in (keys if keys is not None else engine.nodes())]
+    titled = [(k, t) for k, t in catalog if t and t != k]
+    listing = "\n".join(f"{k} :: {t}" for k, t in titled)
+    prompt = (
+        f"Entities in a research knowledge graph (key :: title):\n{listing}\n\n"
+        f"Group them into a few meaningful themes by subject. Give each theme a short "
+        f"label and its list of keys, and a one-sentence summary of the whole set. Use "
+        f"only the keys above; put each key in at most one theme."
+    )
+    result = provider.generate(prompt, system="You organize research entities into clear thematic groups.", schema=_ORGANIZE_SCHEMA)
+    valid, seen, themes = {k for k, _ in titled}, set(), []
+    for th in result.get("themes", []):
+        ks = [k for k in th.get("keys", []) if k in valid and k not in seen]
+        seen.update(ks)
+        if ks:
+            themes.append({"label": (th.get("label") or "misc").strip(), "keys": ks})
+    return {
+        "summary": (result.get("summary") or "").strip(),
+        "themes": themes,
+        "other": [k for k, _ in titled if k not in seen],
+        "untitled": [k for k, t in catalog if not t or t == k],
+    }
 
 
 def ask(provider, engine, query: str) -> list[str]:

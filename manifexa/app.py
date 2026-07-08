@@ -206,6 +206,17 @@ class App:
         with self._lock:
             return ops.ask(self._provider(), self.engine, query)
 
+    def organize(self, key: str | None = None) -> dict:
+        """LLM groups the graph (or one node's neighbourhood) into themes — a
+        meaningful map. Returns summary + themes + leftover/untitled buckets."""
+        from .llm import operations as ops
+
+        with self._lock:
+            keys = None
+            if key:
+                keys = [key] + [n for n, _ in self.engine.neighbors_with_rel(key)]
+            return ops.organize(self._provider(), self.engine, keys)
+
     def export(self) -> dict:
         """The whole graph as plain JSON — for backup, sharing, or a static viewer."""
         with self._lock:

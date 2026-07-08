@@ -206,7 +206,8 @@ HELP = """COMMANDS
   stats                  system status dashboard
   graph [id]             one node's ego-net · no id → whole map
   search <term>          filter your graph
-  map                    whole-graph map — every node + connection
+  map                    whole-graph map (tree) — every node + connection
+  map ai [id]            LLM-organised map: themes + one-line summary
   add <type> <title>     create an entity by hand (same as: new)
   add <doi|openalex>     …or seed a paper + enrich from the web
   new <type> <title>     create an entity by hand
@@ -254,6 +255,7 @@ _MANUAL_SECTIONS = (
         ("bridges · clusters", "connectors · emerging communities"),
         ("similar <id>", "semantic neighbours (needs: embed)"),
         ("map · graph <id>", "whole-graph map · one node's ego-net"),
+        ("map ai [id]", "LLM groups it into themes + a summary"),
         ("stats · search", "dashboard · filter"),
         ("summary · tree", "overview of everything · file tree"),
     )),
@@ -566,6 +568,32 @@ def _render_map(app, st, width=84):
     return "\n".join(out) + "\n" + st.dim(f"  {len(nodes)} nodes · {len(edges)} edges")
 
 
+def _render_ai_map(app, key, st):
+    """LLM-organised map: the graph (or one node's neighbourhood) grouped into
+    labelled themes with a one-line summary — meaning, not just topology."""
+    a, dim = st.a, st.dim
+    try:
+        r = app.organize(key)
+    except Exception as e:
+        return dim(f"map ai unavailable: {e}")
+    g = app.graph()
+    L = [a("  ▤ map · ai" + (f" · {key.split('/')[-1]}" if key else ""))]
+    if r.get("summary"):
+        L.append(dim("  " + r["summary"]))
+    L.append("")
+    for th in r.get("themes", []):
+        L.append(a(f"  ◈ {th['label']}"))                          # ◈ header — distinct from node glyphs
+        for k in th["keys"]:
+            n = g.node(k) or {}
+            L.append(f"     {_dotfor(n)} {n.get('title') or k}")
+        L.append("")
+    if r.get("other"):
+        L.append(dim(f"  · {len(r['other'])} uncategorised"))
+    if r.get("untitled"):
+        L.append(dim(f"  · {len(r['untitled'])} untitled refs — run  add <id>  to fetch titles"))
+    return "\n".join(L).rstrip() or dim("nothing to organise yet")
+
+
 def _render_graph(app, eid, st):
     if not eid:
         return st.dim("usage: graph <id>")
@@ -656,6 +684,8 @@ def dispatch(app, line, st=None):
     if c == "stats":
         return _render_stats(app, st)
     if c in ("graph", "map", "network"):
+        if a and a[0].lower() == "ai":                                  # LLM-organised themed map
+            return _render_ai_map(app, a[1] if len(a) > 1 else None, st)
         if a and a[0] not in ("all", "*"):
             return _render_graph(app, a[0], st)
         w = shutil.get_terminal_size((100, 30)).columns
