@@ -21,3 +21,6 @@ manifexa-export.json
 # Machine-specific launchers — may reference private hosts; never commit
 run-*.sh
 *.local.sh
+
+# Personal Obsidian plugin — lives in the vault, never in the repo
+obsidian-plugin/
