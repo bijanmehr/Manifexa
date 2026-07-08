@@ -206,6 +206,14 @@ class App:
         with self._lock:
             return ops.ask(self._provider(), self.engine, query)
 
+    def forget(self, source_prefix: str = "llm:") -> int:
+        """Drop candidate nodes/edges from a source (default: all LLM proposals)
+        and rebuild the graph. The vault (your curated truth) is untouched."""
+        with self._lock:
+            n = self.cache.delete_by_source(source_prefix)
+            self.rebuild()
+        return n
+
     def organize(self, key: str | None = None) -> dict:
         """LLM groups the graph (or one node's neighbourhood) into themes — a
         meaningful map. Returns summary + themes + leftover/untitled buckets."""

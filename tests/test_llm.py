@@ -45,6 +45,47 @@ def test_expand_writes_candidates_linked_to_the_focal():
     assert "Ada Lovelace" in p.prompts[0]                                        # context in prompt
 
 
+def test_cache_delete_by_source_purges_matching_candidates():
+    c = Cache()
+    c.upsert_node("a", "paper", "A", source="openalex")
+    c.upsert_node("b", "paper", "B", source="llm:local")
+    c.upsert_edge("a", "b", "cites", source="llm:local")
+    c.upsert_edge("x", "a", "cites", source="openalex")
+    removed = c.delete_by_source("llm:")
+    assert removed == 1                                          # one llm node dropped
+    assert {n["key"] for n in c.nodes()} == {"a"}               # openalex node kept
+    assert all(e["source"] == "openalex" for e in c.edges())    # llm edge gone
+
+
+def test_app_forget_drops_llm_candidates_and_rebuilds(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
+    from manifexa.app import App
+
+    app = App(str(tmp_path))
+    app.create("paper", "Real Paper")
+    app.cache.upsert_node("ghost", "paper", "Hallucinated", source="llm:local")
+    app.rebuild()
+    assert app.graph().has_node("ghost")
+    app.forget("llm:")
+    assert not app.graph().has_node("ghost")                    # purged + graph rebuilt
+
+
+def test_expand_dedups_proposals_against_existing_nodes():
+    e = NetworkXEngine()
+    e.add_node("paper/x", type="paper", title="Focal Paper", status="curated")
+    e.add_node("person/hans", type="person", title="Nikolaus Hansen", status="candidate")  # already there
+    cache = Cache()
+    p = FakeProvider({
+        "entities": [{"type": "person", "title": "nikolaus  hansen"}],   # different case/spacing
+        "edges": [{"source": "nikolaus  hansen", "target": "Focal Paper", "rel": "authored"}],
+    })
+    ops.expand(p, e, cache, "paper/x")
+    keys = {n["key"] for n in cache.nodes()}
+    assert "person/nikolaus-hansen" not in keys                          # no duplicate person minted
+    triples = {(x["src"], x["dst"], x["rel"]) for x in cache.edges()}
+    assert ("person/hans", "paper/x", "authored") in triples             # edge reuses the existing node
+
+
 def test_complete_only_links_existing_nodes():
     e, cache = _engine(), Cache()
     p = FakeProvider({"entities": [], "edges": [

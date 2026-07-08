@@ -216,7 +216,8 @@ HELP = """COMMANDS
   remove <id>            delete an entity (alias: rm)
   note <id>              edit notes (multi-line)
   extract                paste text -> Claude pulls entities
-  expand <id>            LLM: propose new related entities (candidates)
+  expand <id>            LLM: author/co-authorship network in the field (candidates)
+  forget [llm]           drop candidates from a source (default: LLM proposals)
   complete <id>          LLM: infer likely missing links (candidates)
   ask <question>         LLM: natural-language search of your graph
   embed                  fetch embeddings (Semantic Scholar)
@@ -751,6 +752,11 @@ def dispatch(app, line, st=None):
             return st.dim("usage: remove <id>")
         app.remove(a[0])
         return st.dim(f"removed {a[0]}")
+    if c in ("forget", "clean"):
+        prefix = (a[0] if a else "llm").rstrip(":")
+        prefix = "llm:" if prefix in ("llm", "ai", "local") else prefix
+        n = app.forget(prefix)
+        return st.dim(f"forgot {n} candidate(s) from '{prefix}' — your curated notes are untouched")
     if c == "embed":
         return st.dim(f"embedded {app.embed().get('embedded', 0)} papers — try  similar <id>")
     if c == "expand":

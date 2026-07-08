@@ -10,7 +10,16 @@ argument, so prompt-building + parsing are unit-tested with a fake.
 """
 from __future__ import annotations
 
+import re
+
 from ..store.slug import make_id
+
+_WS = re.compile(r"[^a-z0-9]+")
+
+
+def _norm(title: str) -> str:
+    """A loose title key for de-duplication — case/punctuation/spacing-insensitive."""
+    return _WS.sub(" ", (title or "").lower()).strip()
 
 # entities + edges — same shape as the extract schema, so candidates flow through the vault as usual
 _GRAPH_SCHEMA = {
@@ -50,12 +59,21 @@ def _title(engine, key):
     return (engine.node(key) or {}).get("title") or key
 
 
-def _write_candidates(cache, result, source, seed=None):
+def _write_candidates(cache, result, source, seed=None, existing=None):
+    """Write proposed entities/edges as candidates, de-duplicated against nodes
+    that already exist (``existing`` maps normalised-title → key). A proposal that
+    matches an existing node reuses its key (so edges attach to it) instead of
+    minting a twin; only genuinely-new entities are created."""
     key_of = dict(seed or {})
+    index = dict(existing or {})                         # normalised title -> key
     written = 0
     for e in result.get("entities", []):
+        norm = _norm(e["title"])
+        if norm in index:                                # already in the graph → reuse, don't duplicate
+            key_of[e["title"]] = index[norm]
+            continue
         k = make_id(e["type"], e["title"])
-        key_of[e["title"]] = k
+        index[norm] = key_of[e["title"]] = k
         cache.upsert_node(k, e["type"], e["title"], {"source": source}, source=source)
         written += 1
     edges = 0
@@ -67,20 +85,38 @@ def _write_candidates(cache, result, source, seed=None):
     return {"entities": written, "edges": edges}
 
 
+def _existing_index(engine) -> dict:
+    """normalised-title → key for every node currently in the graph."""
+    idx = {}
+    for k in engine.nodes():
+        t = _title(engine, k)
+        if t:
+            idx.setdefault(_norm(t), k)
+    return idx
+
+
 def expand(provider, engine, cache, key) -> dict:
+    """Grow the graph around ``key`` along its author / co-authorship network,
+    scoped to the paper's field: its authors and their other papers in the same
+    field. Verifiable structure (real people + real works), de-duplicated against
+    what's already in the graph. Written as candidates tagged ``llm:<provider>``."""
     title = _title(engine, key)
     typ = (engine.node(key) or {}).get("type", "")
-    nbrs = [_title(engine, n) for n, _ in engine.neighbors_with_rel(key)]
+    field = ", ".join(
+        _title(engine, n) for n, _ in engine.neighbors_with_rel(key)
+        if (engine.node(n) or {}).get("type") in ("topic", "concept")) or "its field"
+    known = [_title(engine, n) for n, _ in engine.neighbors_with_rel(key)]
     prompt = (
-        f"'{title}' ({typ}) is a node in my research knowledge graph. It already "
-        f"links to: {', '.join(nbrs) or 'nothing yet'}.\n\n"
-        f"Propose NEW, real, closely-related entities (people, papers, labs, books, "
-        f"concepts) and the edges connecting them to '{title}' or to each other. Only "
-        f"well-established, verifiable items — no guesses. Every edge source/target "
-        f"must exactly match an entity title (you may use '{title}')."
+        f"'{title}' is a {typ} in my research knowledge graph (field: {field}). "
+        f"Already linked: {', '.join(known) or 'nothing yet'}.\n\n"
+        f"Focus ONLY on its author / co-authorship network in the SAME field ({field}):\n"
+        f"1. its authors (as person entities);\n"
+        f"2. other papers those authors have (co-)authored that belong to this field (as paper entities).\n"
+        f"Only real, verifiable people and works — no guesses; omit anything you're unsure of. "
+        f"Add edges 'authored' from each author to '{title}' and to each of their papers you list."
     )
-    result = provider.generate(prompt, system="You expand research knowledge graphs with real, verifiable entities.", schema=_GRAPH_SCHEMA)
-    return _write_candidates(cache, result, f"llm:{provider.name}", seed={title: key})
+    result = provider.generate(prompt, system="You map the author and co-authorship network of a paper, in its field, using only real people and works.", schema=_GRAPH_SCHEMA)
+    return _write_candidates(cache, result, f"llm:{provider.name}", seed={title: key}, existing=_existing_index(engine))
 
 
 def complete(provider, engine, cache, key) -> dict:

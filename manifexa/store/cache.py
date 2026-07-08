@@ -64,6 +64,17 @@ class Cache:
             rows = self.conn.execute("SELECT * FROM nodes").fetchall()
         return [self._node(r) for r in rows]
 
+    def delete_by_source(self, source_prefix: str) -> int:
+        """Drop candidate nodes + edges whose source starts with ``source_prefix``
+        (e.g. ``"llm:"`` to forget every LLM-proposed candidate). Returns the
+        number of nodes removed."""
+        with self._lock:
+            like = source_prefix + "%"
+            n = self.conn.execute("DELETE FROM nodes WHERE source LIKE ?", (like,)).rowcount
+            self.conn.execute("DELETE FROM edges WHERE source LIKE ?", (like,))
+            self.conn.commit()
+            return n
+
     @staticmethod
     def _node(row) -> dict:
         return {

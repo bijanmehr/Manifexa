@@ -53,6 +53,7 @@ SLASH = [
     ("/new", "create <type> <title>"),
     ("/link", "connect two entities <a> <b>"),
     ("/remove", "delete an entity <id>"),
+    ("/forget", "drop LLM candidates (dedupe/clean)"),
     ("/embed", "fetch embeddings"),
     ("/export", "one-file db snapshot"),
     ("/import", "load a snapshot"),
