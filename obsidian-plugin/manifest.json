@@ -1,0 +1,9 @@
+{
+  "id": "manifexa",
+  "name": "Manifexa",
+  "version": "0.1.0",
+  "minAppVersion": "1.4.0",
+  "description": "Turn a DOI into a fully-filled paper note — authors, venue, topics, and abstract from OpenAlex — plus related-work suggestions from a local LLM (balthar/Ollama). Files-as-truth; the manifexa engine curates the graph from them.",
+  "author": "bijan",
+  "isDesktopOnly": false
+}
