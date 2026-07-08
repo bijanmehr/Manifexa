@@ -17,3 +17,7 @@ manifexa-export.json
 # Tooling / OS
 .superpowers/
 .DS_Store
+
+# Machine-specific launchers — may reference private hosts; never commit
+run-*.sh
+*.local.sh
