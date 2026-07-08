@@ -43,7 +43,7 @@ SCHEMA: dict[str, dict] = {
         "rels": {"about": ("paper", "book"), "related": _ANY, "part_of": ("topic",)},
     },
     "concept": {
-        "attrs": {"title": ("str", "required"), "description": ("text", "")},
+        "attrs": {"title": ("str", "required"), "description": ("text", ""), "kind": ("str", "")},
         "rels": {"about": ("paper", "book"), "related": _ANY, "part_of": ("concept",)},
     },
     "book": {
