@@ -62,3 +62,32 @@ def test_link_command_rejects_unknown_target(tmp_path, monkeypatch):
     out = dispatch(a, f"link {p} topic/nope")
     assert "nope" in out and ("doesn't exist" in out.lower() or "no such" in out.lower())
     assert a.open(p).meta.get("links") in (None, [])              # nothing written on a bad link
+
+
+def test_link_many_connects_source_to_all_targets(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
+    a = App(str(tmp_path))
+    p = a.create("paper", "P")
+    t1, t2, pe = a.create("topic", "A"), a.create("concept", "B"), a.create("person", "C")
+    linked, skipped = a.link_many(p, [t1, t2, pe], "related")
+    assert set(linked) == {t1, t2, pe} and skipped == []
+    assert {t1, t2, pe} <= {n for n, _ in a.graph().neighbors_with_rel(p)}
+
+
+def test_link_many_skips_bad_targets_without_aborting(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
+    a = App(str(tmp_path))
+    p, lab, t = a.create("paper", "P"), a.create("lab", "MIT"), a.create("topic", "T")
+    linked, skipped = a.link_many(p, [t, lab], "about")          # about → topic ok, lab not
+    assert t in linked and any(dst == lab for dst, _ in skipped)
+
+
+def test_link_command_takes_multiple_targets(tmp_path, monkeypatch):
+    monkeypatch.setenv("MANIFEXA_ENGINE", "networkx")
+    a = App(str(tmp_path))
+    p = a.create("paper", "On Heat")
+    t1, t2 = a.create("topic", "Thermo"), a.create("concept", "Entropy")
+    out = dispatch(a, f"link {p} {t1} {t2} about")               # two targets + a relation
+    assert "linked" in out.lower()
+    nbrs = {n for n, _ in a.graph().neighbors_with_rel(p)}
+    assert t1 in nbrs and t2 in nbrs

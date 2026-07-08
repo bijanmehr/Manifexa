@@ -277,6 +277,34 @@ class App:
                 self.rebuild()
             return (src, dst, rel)
 
+    def link_many(self, src: str, targets, rel: str = "related") -> tuple[list, list]:
+        """Link ``src`` to each of ``targets`` with a single write + rebuild.
+        Best-effort: skips targets whose relation is invalid rather than aborting.
+        Returns ``(linked, skipped)`` where skipped is ``[(dst, reason)]``."""
+        from .store import schema
+
+        with self._lock:
+            entity = self.vault.read(src)
+            already = {t for _, t in entity.relations}
+            links = [x for x in (entity.meta.get("links") or []) if isinstance(x, str)]
+            linked, skipped = [], []
+            for dst in targets:
+                if dst in already or dst in linked:
+                    continue                                    # idempotent
+                dst_type = (self.engine.node(dst) or {}).get("type") or (
+                    self.vault.read(dst).type if self.vault.exists(dst) else "")
+                issue = schema.relation_ok(entity.type, rel, dst_type)
+                if issue and issue.severity == "error":
+                    skipped.append((dst, issue.message))
+                    continue
+                links.append(f"{rel} :: [[{dst}]]")
+                linked.append(dst)
+            if linked:
+                entity.meta["links"] = links
+                self.vault.write(entity)
+                self.rebuild()
+            return linked, skipped
+
     def inspect(self, entity_id: str):
         """The full structured record for a node — attributes + relations + notes
         + schema issues — assembled from its file and the graph (a NodeView)."""

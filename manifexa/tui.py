@@ -210,7 +210,7 @@ HELP = """COMMANDS
   add <type> <title>     create an entity by hand (same as: new)
   add <doi|openalex>     …or seed a paper + enrich from the web
   new <type> <title>     create an entity by hand
-  link <a> <b> [rel]     connect two entities (a —rel→ b)
+  link <a> <b…> [rel]    connect a to one or more targets
   promote <id>           candidate -> curated
   remove <id>            delete an entity (alias: rm)
   note <id>              edit notes (multi-line)
@@ -258,7 +258,7 @@ _MANUAL_SECTIONS = (
         ("summary · tree", "overview of everything · file tree"),
     )),
     ("curate", (
-        ("link <a> <b> [rel]", "connect two entities by hand (a [[wikilink]] b)"),
+        ("link <a> <b…> [rel]", "connect a to one or more targets by hand"),
         ("promote <id>", "candidate → curated (into your vault)"),
         ("note <id> · remove <id>", "edit notes · delete an entity"),
         ("embed", "fetch embeddings for semantic search"),
@@ -692,17 +692,28 @@ def dispatch(app, line, st=None):
             return st.dim(f"can't create: {e}  (types: {', '.join(TYPES)})")
     if c in ("link", "connect"):
         if len(a) < 2:
-            return st.dim('usage: link <from-id> <to-id> [relation]   e.g.  link paper/on-heat topic/thermodynamics about')
-        src, dst, rel = a[0], a[1], " ".join(a[2:]) or "related"
+            return st.dim('usage: link <from-id> <to-id> [more ids …] [relation]   e.g.  link paper/x topic/a topic/b about')
+        src = a[0]
+        targets = [x for x in a[1:] if "/" in x]                        # ids carry a "/"; the relation doesn't
+        rel = " ".join(x for x in a[1:] if "/" not in x) or "related"
         if not app.vault.exists(src):
             return st.dim(f"{src} isn't one of your entities — create it first  (new <type> \"…\")")
-        if not app.graph().has_node(dst):
-            return st.dim(f"{dst} doesn't exist yet — create it first, then link")
+        if not targets:
+            return st.dim("give at least one target id (type/slug), e.g.  link " + src + " topic/…")
+        missing = [t for t in targets if not app.graph().has_node(t)]
+        present = [t for t in targets if app.graph().has_node(t)]
         try:
-            app.link(src, dst, rel)
+            linked, skipped = app.link_many(src, present, rel) if present else ([], [])
         except Exception as e:
             return st.dim(f"can't link: {e}")
-        return f"linked  {st.a(src)}  {st.dim('—' + rel + '→')}  {st.a(dst)}"
+        lines = []
+        if linked:
+            lines.append(f"linked  {st.a(src)}  {st.dim('—' + rel + '→')}  " + ", ".join(st.a(t) for t in linked))
+        for t in missing:
+            lines.append(st.dim(f"  ✗ {t} — doesn't exist yet"))
+        for t, why in skipped:
+            lines.append(st.dim(f"  ✗ {t} — {why}"))
+        return "\n".join(lines) or st.dim("nothing linked")
     if c == "promote":
         return f"promoted → {st.a(app.promote(a[0]))}" if a else st.dim("usage: promote <id>")
     if c in ("remove", "rm", "delete", "del"):
