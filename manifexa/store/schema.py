@@ -26,29 +26,30 @@ SCHEMA: dict[str, dict] = {
         "attrs": {"title": ("str", "required"), "year": ("int", "recommended"),
                   "doi": ("str", "recommended"), "url": ("url", ""), "venue": ("str", ""),
                   "abstract": ("text", ""), "authors": ("list", "")},
-        "rels": {"authored": ("person",), "about": ("topic", "concept"), "cites": ("paper", "book")},
+        "rels": {"authored": ("person",), "about": ("topic", "concept"),
+                 "cites": ("paper", "book"), "related": _ANY},
     },
     "person": {
         "attrs": {"title": ("str", "required"), "orcid": ("str", ""),
                   "affiliation": ("str", ""), "url": ("url", "")},
-        "rels": {"authored": ("paper", "book"), "affiliated_with": ("lab",)},
+        "rels": {"authored": ("paper", "book"), "affiliated_with": ("lab",), "related": _ANY},
     },
     "lab": {
         "attrs": {"title": ("str", "required"), "url": ("url", ""), "location": ("str", "")},
-        "rels": {"affiliated_with": ("person",)},
+        "rels": {"affiliated_with": ("person",), "related": _ANY},
     },
     "topic": {
         "attrs": {"title": ("str", "required"), "description": ("text", "")},
-        "rels": {"about": ("paper", "book"), "related": ("topic", "concept"), "part_of": ("topic",)},
+        "rels": {"about": ("paper", "book"), "related": _ANY, "part_of": ("topic",)},
     },
     "concept": {
         "attrs": {"title": ("str", "required"), "description": ("text", "")},
-        "rels": {"about": ("paper", "book"), "related": ("concept", "topic"), "part_of": ("concept",)},
+        "rels": {"about": ("paper", "book"), "related": _ANY, "part_of": ("concept",)},
     },
     "book": {
         "attrs": {"title": ("str", "required"), "year": ("int", ""), "isbn": ("str", ""),
                   "url": ("url", ""), "publisher": ("str", ""), "authors": ("list", "")},
-        "rels": {"authored": ("person",), "about": ("topic", "concept")},
+        "rels": {"authored": ("person",), "about": ("topic", "concept"), "related": _ANY},
     },
     "note": {
         "attrs": {"title": ("str", "required")},
@@ -141,14 +142,21 @@ def warnings(issues: list[Issue]) -> list[Issue]:
     return [i for i in issues if i.severity == "warn"]
 
 
+def valid_relations(src_type: str, dst_type: str) -> list[str]:
+    """Relation names on ``src_type`` that may point at a ``dst_type``."""
+    return [r for r, tg in rels_for(src_type).items() if tg == _ANY or (dst_type and dst_type in tg)]
+
+
 def relation_ok(src_type: str, rel: str, dst_type: str) -> Issue | None:
     """Validate an edge ``src_type --rel--> dst_type``. Returns an error Issue if
-    the target type is disallowed, a warn Issue for an unknown relation name, or
-    ``None`` when it's a clean, known relation."""
+    the target type is disallowed (with a hint at relations that would fit), a
+    warn Issue for an unknown relation name, or ``None`` when it's clean."""
     rels = rels_for(src_type)
     if rel not in rels:
         return Issue("warn", rel, f"'{rel}' isn't a standard {src_type} relation")
     targets = rels[rel]
     if targets == _ANY or not dst_type or dst_type in targets:
         return None
-    return Issue("error", rel, f"{src_type} '{rel}' expects {'/'.join(targets)}, not {dst_type}")
+    alt = valid_relations(src_type, dst_type)
+    hint = f" — for {src_type} → {dst_type} use: {', '.join(alt)}" if alt else ""
+    return Issue("error", rel, f"{src_type} '{rel}' expects {'/'.join(targets)}, not {dst_type}{hint}")

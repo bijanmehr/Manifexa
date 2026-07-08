@@ -67,3 +67,16 @@ def test_relation_ok_rejects_disallowed_target():
 def test_unknown_relation_name_warns_but_allows():
     i = schema.relation_ok("paper", "frobnicates", "topic")
     assert i is None or i.severity == "warn"
+
+
+def test_related_is_generic_and_joins_any_types():
+    # the default `link` relation must connect anything — concept↔paper included
+    assert schema.relation_ok("concept", "related", "paper") is None
+    assert schema.relation_ok("topic", "related", "person") is None
+    assert schema.relation_ok("paper", "related", "lab") is None
+
+
+def test_wrong_specific_relation_error_suggests_a_valid_one():
+    i = schema.relation_ok("concept", "about", "person")     # concept 'about' → paper/book only
+    assert i is not None and i.severity == "error"
+    assert "related" in i.message                            # points at a relation that would work
