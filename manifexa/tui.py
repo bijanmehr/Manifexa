@@ -55,16 +55,19 @@ ART = _ring(11, 26)
 BANNER = _ring(15, 42, label="M A N I F E X A")
 
 
-def mobius_frame(A, B, rows=13, cols=26, chars=" ·•●", rstrip=True):
-    """One frame of a rotating 3-D Möbius strip (an infinity band) rendered in
-    dots, depth-shaded near→far. Pure + deterministic in (A, B). With
-    ``rstrip=False`` every frame is exactly rows×cols — a fixed animation frame
-    that never reflows whatever is drawn below it."""
+def mobius_frame(A, B, rows=13, cols=26, chars=" ·•●", rstrip=True, roll=0.0):
+    """One frame of a 3-D Möbius strip (an infinity band) rendered in dots,
+    depth-shaded near→far. ``A``/``B`` tilt the view; ``roll`` spins the whole
+    (already-tilted) strip in the screen plane — continuous one-direction motion
+    that never tumbles edge-on, so it always reads as a strip while the twist
+    turns. Pure + deterministic in (A, B, roll). With ``rstrip=False`` every
+    frame is exactly rows×cols — fixed, so it never reflows what's drawn below."""
     R, K2 = 2.0, 5.0
     K1 = cols * K2 * 3 / (8 * (R + 1))
     out = [[" "] * cols for _ in range(rows)]
     zb = [[0.0] * cols for _ in range(rows)]
     cA, sA, cB, sB = math.cos(A), math.sin(A), math.cos(B), math.sin(B)
+    cR, sR = math.cos(roll), math.sin(roll)
     oozmin, oozmax = 1.0 / (K2 + 3), 1.0 / (K2 - 3)
     u = 0.0
     while u < 2 * math.pi:
@@ -75,9 +78,10 @@ def mobius_frame(A, B, rows=13, cols=26, chars=" ·•●", rstrip=True):
             px, py, pz = rr * cu, rr * su, v * s2
             y1, z1 = py * cA - pz * sA, py * sA + pz * cA          # rotate X by A
             x2, z2 = px * cB + z1 * sB, -px * sB + z1 * cB         # rotate Y by B
+            xr, yr = x2 * cR - y1 * sR, x2 * sR + y1 * cR          # roll in the screen plane
             ooz = 1.0 / (z2 + K2)
-            xp = int(cols / 2 + K1 * ooz * x2)
-            yp = int(rows / 2 - (K1 / 2) * ooz * y1)
+            xp = int(cols / 2 + K1 * ooz * xr)
+            yp = int(rows / 2 - (K1 / 2) * ooz * yr)
             if 0 <= xp < cols and 0 <= yp < rows and ooz > zb[yp][xp]:
                 zb[yp][xp] = ooz
                 lum = (ooz - oozmin) / (oozmax - oozmin)

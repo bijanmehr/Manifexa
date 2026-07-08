@@ -16,7 +16,6 @@ installed (or there's no real terminal), ``run()`` falls back to ``tui.repl``.
 """
 from __future__ import annotations
 
-import math
 import sys
 import time
 from pathlib import Path
@@ -278,7 +277,7 @@ def build(app):
         # tumbles it edge-on into a blob), so the twist shows without a jump.
         size = get_app().output.get_size()
         w = max(18, int(size.columns * 0.22) - 2)
-        art = tui.mobius_frame(0.5, 0.7 * math.sin(time.monotonic() * 0.7), 11, min(w, 22), rstrip=False)
+        art = tui.mobius_frame(0.7, 0.5, 11, min(w, 22), rstrip=False, roll=time.monotonic() * 0.7)
         return ANSI(_files_panel(state, st, art, w, max(10, size.rows - 1)))
 
     input_window = Window(BufferControl(buffer=input_buffer), height=1)
