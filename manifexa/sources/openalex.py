@@ -32,8 +32,26 @@ def _title(work: dict) -> str:
     return work.get("title") or work.get("display_name") or ""
 
 
+def reconstruct_abstract(inverted_index) -> str:
+    """OpenAlex stores abstracts as ``{word: [positions]}`` — put the words back
+    in order."""
+    if not inverted_index:
+        return ""
+    placed = [(p, w) for w, ps in inverted_index.items() for p in ps]
+    return " ".join(w for _, w in sorted(placed))
+
+
+def work_venue(work: dict) -> str:
+    return ((work.get("primary_location") or {}).get("source") or {}).get("display_name") or ""
+
+
+def work_topics(work: dict, limit: int = 4) -> list[str]:
+    return [t["display_name"] for t in (work.get("topics") or [])[:limit] if t.get("display_name")]
+
+
 def work_to_entity(work: dict) -> Entity:
-    """An OpenAlex work -> a curated ``paper`` entity for the vault."""
+    """An OpenAlex work -> a curated ``paper`` entity for the vault, filled out:
+    authors, year, doi, venue, topics (as ``[[wikilinks]]``), abstract (body)."""
     title = _title(work)
     authors = [a.get("author", {}).get("display_name", "") for a in work.get("authorships", [])]
     meta = {
@@ -41,11 +59,15 @@ def work_to_entity(work: dict) -> Entity:
         "title": title,
         "year": work.get("publication_year"),
         "doi": work.get("doi"),
+        "venue": work_venue(work) or None,
         "openalex": normalize_openalex_id(work["id"]),
         "authors": [f"[[{name}]]" for name in authors if name],
+        "topics": [f"[[{make_id('topic', t)}]]" for t in work_topics(work)],
         "status": "curated",
     }
-    return Entity(id=make_id("paper", title), meta=meta, body="")
+    meta = {k: v for k, v in meta.items() if v not in (None, [])}          # keep frontmatter tidy
+    body = reconstruct_abstract(work.get("abstract_inverted_index"))
+    return Entity(id=make_id("paper", title), meta=meta, body=(f"## Abstract\n\n{body}\n" if body else ""))
 
 
 def extract_neighbors(work: dict) -> tuple[list[dict], list[dict]]:

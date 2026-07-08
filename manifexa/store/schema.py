@@ -25,7 +25,7 @@ SCHEMA: dict[str, dict] = {
     "paper": {
         "attrs": {"title": ("str", "required"), "year": ("int", "recommended"),
                   "doi": ("str", "recommended"), "url": ("url", ""), "venue": ("str", ""),
-                  "abstract": ("text", ""), "authors": ("list", "")},
+                  "abstract": ("text", ""), "authors": ("list", ""), "topics": ("list", "")},
         "rels": {"authored": ("person",), "about": ("topic", "concept"),
                  "cites": ("paper", "book"), "related": _ANY},
     },
