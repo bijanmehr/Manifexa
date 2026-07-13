@@ -20,9 +20,16 @@ def _state():
     return {"current": None, "recent": [], "engine": "networkx", "home": "~"}
 
 
+def test_stage_labels_slow_commands():
+    assert "Scholar" in tui_app._stage("add https://scholar.google.com/citations?user=x")
+    assert "OpenAlex" in tui_app._stage("add 0000-0002-1243-7707")
+    assert tui_app._stage("expand A1").endswith("…")
+    assert "add" in tui_app._SLOW and "expand" in tui_app._SLOW and "who" not in tui_app._SLOW
+
+
 def test_slash_palette_has_core_commands():
     cmds = [c for c, _ in tui_app.SLASH]
-    for x in ("/help", "/graph", "/map", "/bridges", "/stats", "/quit"):
+    for x in ("/help", "/add", "/who", "/near", "/map", "/bridges", "/groups", "/quit"):
         assert x in cmds
 
 
@@ -128,7 +135,7 @@ def test_complete_covers_commands_ids_types_colours(tmp_path):
     assert "person/ada-lovelace" in C("around ada")    # ids match on slug / title substring
     assert "person" in C("new p") and "paper" in C("new p")   # entity types
     assert C("color gr") == ["green"]                  # colours
-    assert "/graph" in C("/gr")                        # slash palette
+    assert "/groups" in C("/gr")                        # slash palette
 
 
 def test_build_constructs_the_application(tmp_path):

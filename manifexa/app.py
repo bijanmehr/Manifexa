@@ -23,8 +23,52 @@ from .store.slug import make_id
 from .store.vault import Vault
 
 
+def _node_fields(m: dict) -> list[list[str]]:
+    """A person's full field list [[label, value], …] for the inspector — every
+    cache-meta field worth auditing, in a stable, readable order."""
+    out: list[list[str]] = []
+
+    def add(label, val):
+        if val in (None, "", [], {}):
+            return
+        out.append([label, val if isinstance(val, str) else str(val)])
+
+    add("ORCID", m.get("orcid"))
+    add("now", m.get("current_affiliation"))
+    add("email", m.get("email_domain"))
+    add("h-index", m.get("h_index"))
+    add("works", m.get("works_count"))
+    add("citations", m.get("cited_by_count"))
+    add("papers (5y)", len(m.get("window_work_ids") or []) or None)
+    if m.get("topics"):
+        add("topics", ", ".join(m["topics"]))
+    if m.get("affiliations"):
+        add("affiliations (history)", " · ".join(m["affiliations"]))
+    if m.get("aliases"):
+        add("aliases", ", ".join(m["aliases"]))
+    add("coauthors", len(m.get("coauthors") or []) or None)
+    add("Scholar pubs", len(m.get("publications") or []) or None)
+    add("Scholar", m.get("scholar_url"))
+    add("OpenAlex", m.get("openalex"))
+    add("source", m.get("source"))
+    return out
+
+
+def _year_window(today, years: int) -> tuple[int, str]:
+    """(year, from_date) for the ``years``-year publication window ending at
+    ``today``. The day is clamped to ≤28 so a leap day (Feb 29) never lands on a
+    non-leap earlier year — the exact day of a publication-date floor is immaterial."""
+    day = min(today.day, 28)
+    return today.year, f"{today.year - years:04d}-{today.month:02d}-{day:02d}"
+
+
+def _five_year_window(today) -> tuple[int, str]:
+    return _year_window(today, 5)
+
+
 class App:
-    def __init__(self, home, client=None, engine=None, s2_client=None, crossref_client=None, extractor=None, llm=None) -> None:
+    def __init__(self, home, client=None, engine=None, s2_client=None, crossref_client=None,
+                 extractor=None, llm=None, clock=None, people_client=None, scholar_fetch=None) -> None:
         self.home = Path(home)
         self.home.mkdir(parents=True, exist_ok=True)
         self.vault = Vault(self.home / "vault")
@@ -34,15 +78,19 @@ class App:
         self.crossref_client = crossref_client
         self.extractor = extractor
         self.llm = llm
+        self._clock = clock                    # Eminexa: () -> (today_year, from_date)
+        self._people_client = people_client    # Eminexa: injectable PeopleClient (tests)
+        self._scholar_fetch = scholar_fetch    # Eminexa: injectable Scholar HTML fetcher (tests)
         self.engine = engine if engine is not None else NetworkXEngine()
         self._lock = threading.RLock()
         self.rebuild()
 
     def _ensure_client(self):
         if self.client is None:
-            from .sources.openalex import OpenAlexClient
+            from .sources.openalex import OpenAlexClient, load_openalex_config
 
-            self.client = OpenAlexClient()
+            # use the polite/authenticated pool (mailto + api_key) — far fewer 429s
+            self.client = OpenAlexClient(**load_openalex_config())
         return self.client
 
     # --- graph lifecycle ---
@@ -89,6 +137,103 @@ class App:
                 res = {"entity": entity.id, "nodes": 0, "edges": 0, "source": "crossref"}
             self.rebuild()
         return res
+
+    # --- Eminexa: people network (people live in the cache, source="eminexa") ---
+    def _people(self):
+        if self._people_client is not None:
+            return self._people_client
+        from .eminexa.people import PeopleClient
+
+        return PeopleClient(self._ensure_client())
+
+    def _window_years(self) -> int:
+        """The publication window in years (default 5), from this folder's config
+        — set with the `window <n>` command."""
+        from .tui import load_config
+
+        try:
+            n = int(load_config(self.home).get("window", 5))
+        except (TypeError, ValueError):
+            n = 5
+        return n if 1 <= n <= 25 else 5
+
+    def _window(self) -> tuple[int, str]:
+        """(today_year, from_date) for the configured window. Injectable via
+        `clock` so ingest is deterministic in tests."""
+        if self._clock is not None:
+            return self._clock()
+        import datetime
+
+        return _year_window(datetime.date.today(), self._window_years())
+
+    def add_person(self, seed: str) -> dict:
+        """Ingest a researcher (OpenAlex id / ORCID) + their coauthors into the
+        people graph, then rebuild. Returns {person, coauthors, edges}."""
+        from .eminexa.ingest import ingest_person
+
+        with self._lock:
+            year, from_date = self._window()
+            res = ingest_person(self.cache, self._people(), seed, today_year=year,
+                                from_date=from_date, fetch=self._scholar_fetch)
+            self.rebuild()
+        return res
+
+    def person_view(self, author_id: str) -> dict | None:
+        """A person's card data — their `meta` plus `title`/`key` for display.
+        None if they're not in the people graph yet."""
+        node = self.cache.get_node(author_id)
+        if not node:
+            return None
+        return {**node["meta"], "title": node["title"], "key": node["key"]}
+
+    def graph_data(self) -> dict:
+        """The whole graph as ``{"nodes", "edges"}`` for the web view. Each node
+        carries its ``role`` (seed / coauthor / curated), flat columns for the
+        audit table (``aff``/``h``/``works``/``cites``/``ncoauth``/``topics``),
+        and a full ``fields`` list [[label, value], …] for the inspector."""
+        with self._lock:
+            g = self.engine
+            # community id per node (Louvain — the same_group inference) for color-by-cluster
+            cluster_of: dict[str, int] = {}
+            for i, c in enumerate(discovery.clusters(self.engine, min_size=2)):
+                for mk in c["members"]:
+                    cluster_of[mk] = i
+            nodes = []
+            for k in g.nodes():
+                node = g.node(k) or {}
+                cn = self.cache.get_node(k)
+                m = (cn or {}).get("meta") or {}
+                stub = bool(m.get("stub"))
+                role = ("coauthor" if stub else "seed") if cn else (
+                    "curated" if node.get("status") == "curated" else "node")
+                aff = m.get("current_affiliation") or (m.get("affiliations") or [None])[0]
+                nodes.append({
+                    "key": k, "type": node.get("type"), "title": node.get("title") or k,
+                    "status": node.get("status"), "role": role, "cluster": cluster_of.get(k, -1),
+                    "aff": aff, "h": m.get("h_index"), "works": m.get("works_count"),
+                    "cites": m.get("cited_by_count"), "ncoauth": len(m.get("coauthors") or []),
+                    "topics": (m.get("topics") or [])[:6],
+                    "pubs": (m.get("publications") or [])[:40],   # Scholar list, for the inspector
+                    "fields": _node_fields(m) if not stub else [],
+                })
+            edges, seen = [], set()
+            for k in g.nodes():
+                for nbr, rel in g.neighbors_with_rel(k):
+                    pair = tuple(sorted((k, nbr)))
+                    if pair not in seen:
+                        seen.add(pair)
+                        edges.append({"src": pair[0], "dst": pair[1], "rel": rel})
+            return {"nodes": nodes, "edges": edges}
+
+    def export_html(self, path: str | None = None, title: str = "Eminexa · graph") -> str:
+        """Render the whole graph to a self-contained interactive HTML web view —
+        control panel, force-directed graph, per-node inspector, and audit table."""
+        from .viz import graph_to_html
+
+        html = graph_to_html(self.graph_data(), title=title)
+        if path:
+            Path(path).expanduser().write_text(html, encoding="utf-8")
+        return html
 
     def promote(self, candidate_key: str, note: str = "") -> str:
         with self._lock:

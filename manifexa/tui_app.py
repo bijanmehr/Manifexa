@@ -31,43 +31,37 @@ def available() -> bool:
         return False
 
 
-# the `/` palette — (command, one-line help)
+# the `/` palette — the clean, people-first surface (command, one-line help)
 SLASH = [
-    ("/help", "all commands"),
-    ("/about", "what is this"),
-    ("/manual", "the manual page + diagram"),
-    ("/vault", "show / switch vault folder"),
-    ("/tree", "list the vault files"),
-    ("/summary", "overview of the whole vault"),
-    ("/ask", "LLM natural-language search"),
-    ("/ls", "list curated entities"),
-    ("/around", "hidden connections <id>"),
-    ("/map", "whole-graph map — all nodes, named"),
-    ("/map ai", "LLM-organised map: themes + summary"),
-    ("/graph", "one node's ego-net <id>"),
-    ("/bridges", "connectors by betweenness"),
-    ("/clusters", "emerging communities"),
-    ("/similar", "semantic neighbours <id>"),
-    ("/stats", "system status"),
-    ("/add", "seed + enrich <doi>"),
-    ("/new", "create <type> <title>"),
-    ("/link", "connect two entities <a> <b>"),
-    ("/remove", "delete an entity <id>"),
-    ("/forget", "drop LLM candidates (dedupe/clean)"),
-    ("/embed", "fetch embeddings"),
-    ("/export", "one-file db snapshot"),
-    ("/import", "load a snapshot"),
+    ("/add", "add a person <id·orcid·scholar>"),
+    ("/who", "a person's card <id>"),
+    ("/expand", "flesh a coauthor stub <id>"),
+    ("/near", "who they're connected to <id>"),
+    ("/path", "the chain between two <a> <b>"),
+    ("/bridges", "the people who connect groups"),
+    ("/groups", "research groups, inferred"),
+    ("/map", "the whole graph (ascii)"),
+    ("/view", "open the graph in a browser"),
+    ("/list", "everyone in the graph"),
+    ("/save", "back up this folder"),
+    ("/load", "restore from a backup <file>"),
+    ("/drop", "remove someone <id>"),
     ("/color", "amber green teal cyan …"),
+    ("/manual", "what this is + a diagram"),
+    ("/help", "all commands"),
     ("/clear", "clear the transcript"),
     ("/quit", "exit"),
 ]
-_COMPLETE_IDS = ("open", "inspect", "around", "graph", "similar", "promote", "remove", "rm", "note",
-                 "path", "expand", "complete", "link", "connect")
+_COMPLETE_IDS = ("who", "open", "inspect", "near", "around", "graph", "similar", "promote",
+                 "remove", "rm", "drop", "note", "path", "expand", "complete", "link", "connect")
 _TYPES = tui.TYPES
-_CMDS = ("help", "manual", "ls", "open", "inspect", "around", "path", "bridges", "clusters",
-         "similar", "stats", "graph", "map", "search", "add", "new", "link", "promote", "remove",
-         "note", "extract", "expand", "complete", "ask", "embed", "export",
-         "import", "vault", "tree", "summary", "color", "about", "clear", "quit", "exit")
+# every verb that tab-completes — clean verbs first, demoted verbs kept so power
+# users who type them still complete (they're just off the palette).
+_CMDS = ("add", "who", "expand", "window", "near", "path", "bridges", "groups", "map", "view", "list",
+         "save", "load", "drop", "color", "manual", "help", "about", "clear", "quit", "exit",
+         "ls", "open", "inspect", "around", "clusters", "similar", "stats", "graph", "search",
+         "new", "link", "promote", "remove", "note", "extract", "complete", "ask", "embed",
+         "export", "import", "vault", "tree", "summary")
 
 
 def _complete(app, text):
@@ -202,6 +196,62 @@ def _process(app, text, transcript, state, st):
     return None
 
 
+# commands that hit the network / LLM — run these off the event loop with a
+# spinner so a multi-second fetch never freezes the shell.
+_SLOW = {"add", "expand", "embed", "ask", "find", "complete", "similar", "import", "load"}
+
+
+def _stage(body: str) -> str:
+    """A short label for what a slow command is doing (shown beside the spinner)."""
+    b = body.lower()
+    if "scholar.google" in b:
+        return "resolving Google Scholar → OpenAlex…"
+    if b.startswith(("add", "expand")):
+        return "fetching from OpenAlex…"
+    if b.startswith(("ask", "find", "complete")):
+        return "thinking…"
+    if b.startswith("embed"):
+        return "fetching embeddings…"
+    if b.startswith(("import", "load")):
+        return "loading…"
+    return "working…"
+
+
+async def _run_slow(app, text, transcript, state, st):
+    """Run a slow command off the event loop with a live spinner. The dispatch
+    runs in a worker thread; meanwhile we animate a braille spinner and keep the
+    UI responsive — so the shell no longer freezes during a Scholar fetch."""
+    import asyncio
+    from prompt_toolkit.application import get_app
+
+    ptapp = get_app()
+    body = text[1:].strip() if text.startswith("/") else text
+    transcript.append("")
+    transcript.append(st.a("› ") + text)
+    idx = len(transcript)
+    frames = "⣾⣽⣻⢿⡿⣟⣯⣷"
+    transcript.append(st.a(frames[0]) + st.dim(" " + _stage(body)))
+    result: dict = {}
+
+    def work():
+        try:
+            result["out"] = tui.dispatch(app, body, st)
+        except Exception as e:                       # surface any failure as a line
+            result["out"] = st.dim(f"error: {e}")
+
+    fut = asyncio.get_event_loop().run_in_executor(None, work)
+    i = 1
+    while not fut.done():
+        transcript[idx] = st.a(frames[i % len(frames)]) + st.dim(" " + _stage(body))
+        ptapp.invalidate()
+        i += 1
+        await asyncio.sleep(0.09)
+    await fut
+    transcript[idx] = result.get("out", "") or ""
+    _refresh_context(app, state)
+    ptapp.invalidate()
+
+
 def build(app):
     """Construct (but don't run) the prompt_toolkit Application. Importable and
     unit-constructable so the layout is verified even without a live terminal."""
@@ -240,7 +290,16 @@ def build(app):
             _refresh_context(app, state)   # refresh live context once per command
 
     def on_accept(buff):
-        run_line(buff.text)
+        text = buff.text
+        body = (text[1:] if text.startswith("/") else text).strip()
+        head = body.split()[0].lower() if body.split() else ""
+        if head in _SLOW:                              # off-thread + spinner, non-blocking
+            try:
+                get_app().create_background_task(_run_slow(app, text, transcript, state, st))
+            except Exception:
+                run_line(text)                         # fallback: synchronous
+        else:
+            run_line(text)
         return False  # clear the input
 
     _dirs = PathCompleter(only_directories=True, expanduser=True)   # for `vault <path>`

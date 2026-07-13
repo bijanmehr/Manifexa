@@ -18,6 +18,8 @@ _REL_PHRASE = {
     "cites": "citation link",
     "affiliated_with": "shared affiliation",
     "member_of": "membership link",
+    "coauthored": "co-authored a paper",
+    "same_group": "same research group",
 }
 
 

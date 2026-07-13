@@ -11,6 +11,7 @@ Two parts kept deliberately separate:
 from __future__ import annotations
 
 import json
+import os
 import urllib.parse
 import urllib.request
 
@@ -107,19 +108,46 @@ def extract_neighbors(work: dict) -> tuple[list[dict], list[dict]]:
     return nodes, edges
 
 
+def load_openalex_config(path: str | None = None) -> dict:
+    """Read OpenAlex credentials for the *polite/authenticated* pool from
+    ``~/.manifexa/openalex.json`` (keys: ``mailto``, ``api_key``), falling back to
+    the ``OPENALEX_MAILTO`` env var. Returns only the keys that are set — so
+    ``OpenAlexClient(**load_openalex_config())`` just works. Never logged."""
+    path = path or os.path.expanduser("~/.manifexa/openalex.json")
+    cfg: dict = {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        for k in ("mailto", "api_key"):
+            if data.get(k):
+                cfg[k] = data[k]
+    except (OSError, ValueError):
+        pass
+    if not cfg.get("mailto") and os.environ.get("OPENALEX_MAILTO"):
+        cfg["mailto"] = os.environ["OPENALEX_MAILTO"]
+    return cfg
+
+
 class OpenAlexClient:
-    """Thin HTTP client for the live OpenAlex API (no business logic)."""
+    """Thin HTTP client for the live OpenAlex API (no business logic).
+
+    Pass ``mailto`` (the *polite pool* — faster, more consistent, far fewer 429s)
+    and/or ``api_key`` (authenticated). ``OpenAlexClient(**load_openalex_config())``
+    picks both up from ``~/.manifexa/openalex.json``."""
 
     BASE = "https://api.openalex.org"
 
-    def __init__(self, mailto: str | None = None, timeout: int = 15) -> None:
+    def __init__(self, mailto: str | None = None, api_key: str | None = None, timeout: int = 15) -> None:
         self.mailto = mailto
+        self.api_key = api_key
         self.timeout = timeout
 
     def _get(self, path: str, params: dict | None = None) -> dict:
         params = dict(params or {})
         if self.mailto:
             params["mailto"] = self.mailto
+        if self.api_key:
+            params["api_key"] = self.api_key
         url = f"{self.BASE}/{path}"
         if params:
             url += "?" + urllib.parse.urlencode(params)

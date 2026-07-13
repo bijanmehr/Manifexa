@@ -185,6 +185,17 @@ def _looks_like_seed(s: str) -> bool:
     return bool(_SEED_RE.match((s or "").strip()))
 
 
+# A person seed for Eminexa: an OpenAlex author id (A…), an ORCID (bare or
+# orcid.org URL), or a Google-Scholar profile URL. Distinct from _SEED_RE, which
+# matches papers (DOIs / W… work ids).
+_PERSON_SEED_RE = re.compile(r"^(?:A\d+|(?:https?://orcid\.org/)?\d{4}-\d{4}-\d{4}-\d{3}[\dX])$", re.I)
+
+
+def _person_seed(s: str) -> bool:
+    s = (s or "").strip()
+    return bool(_PERSON_SEED_RE.match(s)) or "scholar.google." in s
+
+
 def _statusline(app, home, engine, phosphor, width) -> str:
     """The Claude-Code-style separator/status bar shown above the prompt —
     info on the left, navigation hints on the right, ─ filling the gap."""
@@ -195,40 +206,29 @@ def _statusline(app, home, engine, phosphor, width) -> str:
     return left + "─" * (width - len(left) - len(right)) + right
 
 
-HELP = """COMMANDS
-  ls                     list your curated entities
-  open <id>              inspect an entity: fields + connections (alias: inspect)
-  around <id>            surface hidden connections
-  path <a> <b>           the chain between two entities
-  bridges                connectors, ranked by betweenness
-  clusters               emerging communities
-  similar <id>           semantic neighbours (needs: embed)
-  stats                  system status dashboard
-  graph [id]             one node's ego-net · no id → whole map
-  search <term>          filter your graph
-  map                    whole-graph map (tree) — every node + connection
-  map ai [id]            LLM-organised map: themes + one-line summary
-  add <type> <title>     create an entity by hand (same as: new)
-  add <doi|openalex>     …or seed a paper + enrich from the web
-  new <type> <title>     create an entity by hand
-  link <a> <b…> [rel]    connect a to one or more targets
-  promote <id>           candidate -> curated
-  remove <id>            delete an entity (alias: rm)
-  note <id>              edit notes (multi-line)
-  extract                paste text -> Claude pulls entities
-  expand <id>            LLM: author/co-authorship network in the field (candidates)
-  forget [llm]           drop candidates from a source (default: LLM proposals)
-  complete <id>          LLM: infer likely missing links (candidates)
-  ask <question>         LLM: natural-language search of your graph
-  embed                  fetch embeddings (Semantic Scholar)
-  export [path]          one-file snapshot of the whole database
-  import <path>          load a snapshot back in
-  vault [path]           show / switch the vault folder
-  tree                   list the vault's files
-  summary                overview of the whole vault (counts · tree · graph)
-  color / phosphor <c>   amber green teal cyan magenta white blue (persists)
-  manual                 what this is + a diagram of the system
-  spin · about · clear · help · quit / exit"""
+HELP = """Eminexa · a graph of people
+
+GROW
+  add <id·orcid·scholar>   add a person + their coauthors
+  expand <id>              flesh a coauthor stub into a full node
+  window <n>               coauthor/publication window — last N years (default 5)
+SEE
+  who <id>                 a person's card — prominence, topics, coauthors
+  list                     everyone in the graph
+  map [id]                 the whole graph · one node's ego-net (ascii)
+  view [file]              open the graph in a browser — interactive, force-directed
+CONNECT
+  near <id>                who they're connected to, and why
+  path <a> <b>             the chain between two people
+  bridges                  the people who connect groups
+  groups                   research groups, inferred (same_group)
+KEEP
+  save [file]              back up this folder to JSON
+  load <file>              restore from a backup
+  drop <id>                remove someone
+META
+  color <theme>            amber green teal cyan magenta white blue (persists)
+  manual · about · clear · help · quit"""
 
 
 _DIAGRAM = (
@@ -412,13 +412,25 @@ def render_summary(app, st) -> str:
 
 
 # ---------- pure renderers ----------
-def _render_list(app, st):
-    ents = sorted(app.list(), key=lambda e: e.id)
-    if not ents:
-        return st.dim('nothing curated yet — try  new person "Ada Lovelace"  or  add <doi>')
-    lines = [st.dim(f"{len(ents)} curated")]
-    for e in ents:
-        lines.append(f"  {DOT.get(e.type, '·')} {_pad(e.type, 7)} {st.a(_pad(e.id, 32))} {e.title or ''}")
+def _render_list(app, st, cap: int = 100):
+    """Everyone in the graph — curated (●) and candidate (○) alike. Eminexa
+    people live in the cache as candidates, so a curated-only listing would show
+    an empty folder; this lists all graph nodes, sorted by type then name."""
+    g = app.graph()
+    rows = []
+    for k in g.nodes():
+        n = g.node(k) or {}
+        rows.append((n.get("type") or "", n.get("title") or k, k, n.get("status")))
+    if not rows:
+        return st.dim("nobody here yet — add someone with  add <id·orcid·scholar>")
+    rows.sort(key=lambda r: (r[0], (r[1] or r[2]).lower()))
+    lines = [st.dim(f"{len(rows)} in the graph")]
+    for typ, title, key, status in rows[:cap]:
+        dot = "○" if status == "candidate" else DOT.get(typ, "●")
+        label = "" if title == key else title
+        lines.append(f"  {dot} {_pad(typ, 7)} {st.a(_pad(key, 24))} {label}")
+    if len(rows) > cap:
+        lines.append(st.dim(f"  … +{len(rows) - cap} more"))
     return "\n".join(lines)
 
 
@@ -466,12 +478,14 @@ def _render_scored(header, rows, st, reason_key=None):
 def _render_clusters(app, st):
     cs = app.clusters()
     if not cs:
-        return st.dim("no clusters yet — add more connected seeds")
+        return st.dim("no groups yet — add more connected people")
+    g = app.graph()
     mx = max(c["size"] for c in cs) or 1
-    lines = [st.dim(f"clusters · {len(cs)} communities")]
+    lines = [st.dim(f"groups · {len(cs)} inferred")]
     for i, c in enumerate(cs, 1):
-        names = " · ".join(st.a(m.get("title") or m["key"]) for m in c["members"][:10])
-        lines.append(f"  ▚ {st.dim('cluster ' + str(i) + ' · ' + str(c['size']) + ' nodes')} {hbar(c['size'], mx, 10)}")
+        # members are node KEYS — resolve each to its title through the graph
+        names = " · ".join(st.a((g.node(k) or {}).get("title") or k) for k in c["members"][:10])
+        lines.append(f"  ▚ {st.dim('group ' + str(i) + ' · ' + str(c['size']) + ' people')} {hbar(c['size'], mx, 10)}")
         lines.append(f"     {names}" + (st.dim(f"  +{c['size'] - 10} more") if c["size"] > 10 else ""))
     return "\n".join(lines)
 
@@ -665,11 +679,45 @@ def dispatch(app, line, st=None):
         return _render_list(app, st)
     if c in ("open", "cat", "inspect"):
         return _render_entity(app, a[0] if a else "", st)
-    if c == "around":
+    if c == "window":
+        cur = app._window_years()
+        if not a or not a[0].isdigit():
+            return st.dim(f"coauthor/publication window = last {cur} years  ·  set with  window <n>  (e.g. window 3)")
+        n = max(1, min(25, int(a[0])))
+        save_config(app.home, window=n)
+        return st.dim(f"window → last {n} years  ·  applies to new adds & re-adds "
+                      f"(existing people keep their {cur}y data until re-added)")
+    if c == "who":
         if not a:
-            return st.dim("usage: around <id>")
+            return st.dim("usage: who <OpenAlex author id>")
+        m = app.person_view(a[0])
+        if not m:
+            return st.dim(f"{a[0]} isn't in the people graph — add them with  add <id|orcid>")
+        lines = [st.a(m.get("title") or a[0]) + st.dim(f"  ·  {a[0]}"),
+                 st.dim(f"  h-index {m.get('h_index')}  ·  {m.get('works_count')} works, "
+                        f"{m.get('cited_by_count')} cites")]
+        if m.get("current_affiliation"):                                # leading edge, from Scholar
+            now = st.dim("  now:    ") + m["current_affiliation"]
+            if m.get("email_domain"):
+                now += st.dim(f"  ✉ {m['email_domain']}")
+            lines.append(now)
+        if m.get("affiliations"):
+            lines.append(st.dim("  affil:  ") + "; ".join(m["affiliations"][:2]))
+        if m.get("topics"):
+            lines.append(st.dim("  topics: ") + ", ".join(m["topics"][:6]))
+        cos = m.get("coauthors") or []
+        if cos:
+            lines.append(st.dim(f"  co ({len(cos)}): ") + ", ".join(c["name"] for c in cos[:8]))
+        pubs = m.get("publications") or []
+        if pubs:
+            lines.append(st.dim(f"  pubs ({len(pubs)}, Scholar): ")
+                         + " · ".join(p.get("title", "")[:34] for p in pubs[:3]))
+        return "\n".join(lines)
+    if c in ("around", "near"):
+        if not a:
+            return st.dim("usage: near <id>")
         rs = app.around(a[0])
-        return _render_scored(f"around {a[0]} · {len(rs)} found", rs, st, reason_key="reason")
+        return _render_scored(f"near {a[0]} · {len(rs)} found", rs, st, reason_key="reason")
     if c == "similar":
         if not a:
             return st.dim("usage: similar <id>")
@@ -678,8 +726,25 @@ def dispatch(app, line, st=None):
     if c == "bridges":
         rs = app.bridges()
         return _render_scored(f"bridges · top {len(rs)} by betweenness", rs, st)
-    if c == "clusters":
+    if c in ("clusters", "groups"):
         return _render_clusters(app, st)
+    if c in ("view", "html"):
+        import webbrowser
+        from pathlib import Path
+        path = Path(a[0]).expanduser() if a else (app.home / "eminexa-graph.html")
+        try:
+            app.export_html(str(path), title=f"Eminexa · {app.home.name or 'graph'}")
+        except Exception as e:
+            return st.dim(f"couldn't export the graph: {e}")
+        n = len(list(app.graph().nodes()))
+        opened = False
+        if sys.stdout.isatty():                        # don't spawn a browser in tests/pipes
+            try:
+                opened = webbrowser.open(path.resolve().as_uri())
+            except Exception:
+                opened = False
+        tail = " · opened in your browser" if opened else " · open it in a browser"
+        return st.dim(f"graph ({n} nodes) → ") + st.a(str(path)) + st.dim(tail)
     if c == "path":
         return _render_path(app, a[0] if a else "", a[1] if len(a) > 1 else "", st)
     if c == "stats":
@@ -699,8 +764,25 @@ def dispatch(app, line, st=None):
         return "\n".join([st.dim(f"search · {len(ents)}")] +
                          [f"  {_pad(e.type, 7)} {st.a(_pad(e.id, 30))} {e.title or ''}" for e in ents])
     if c == "add":
+        if a and _person_seed(a[0]):                                    # Eminexa: add a person
+            try:
+                r = app.add_person(" ".join(a))
+            except Exception as e:
+                if "429" in str(e):
+                    return st.dim("OpenAlex is rate-limiting (429) — wait ~30s and retry. "
+                                  "Now on the polite pool (mailto + api_key), so this should be rare.")
+                return st.dim(f"couldn't add person: {e}")
+            name = r.get("name") or r["person"]
+            line = f"+ {st.a(name)} " + st.dim(
+                f"· {r['person']} · {r['coauthors']} coauthors, {r['edges']} coauthored edges")
+            sc = r.get("scholar")                                       # Scholar seed: show the anchor
+            if sc:
+                head = (st.dim("scholar «") + sc["name"] + st.dim("» → ") + st.a(r["person"])
+                        + st.dim(f"  (matched {sc['corroboration']}/{sc['searched']} papers)"))
+                return head + "\n" + line
+            return line
         if not a:
-            return st.dim("usage:  add <type> <title>  (create by hand)  ·  add <doi|openalex id>  (enrich from the web)")
+            return st.dim("usage:  add <id|orcid|scholar>  (add a person)  ·  add <type> <title>  (create by hand)  ·  add <doi|openalex id>  (enrich a paper)")
         seed = " ".join(a)
         if a[0].lower() in TYPES and len(a) >= 2:                       # add <type> <rest>
             rest = " ".join(a[1:]).strip(chr(34) + chr(39))
@@ -747,9 +829,9 @@ def dispatch(app, line, st=None):
         return "\n".join(lines) or st.dim("nothing linked")
     if c == "promote":
         return f"promoted → {st.a(app.promote(a[0]))}" if a else st.dim("usage: promote <id>")
-    if c in ("remove", "rm", "delete", "del"):
+    if c in ("remove", "rm", "delete", "del", "drop"):
         if not a:
-            return st.dim("usage: remove <id>")
+            return st.dim("usage: drop <id>")
         app.remove(a[0])
         return st.dim(f"removed {a[0]}")
     if c in ("forget", "clean"):
@@ -760,6 +842,12 @@ def dispatch(app, line, st=None):
     if c == "embed":
         return st.dim(f"embedded {app.embed().get('embedded', 0)} papers — try  similar <id>")
     if c == "expand":
+        if a and _person_seed(a[0]):                                    # Eminexa: flesh a coauthor stub
+            try:
+                r = app.add_person(a[0])
+            except Exception as e:
+                return st.dim(f"couldn't flesh {a[0]}: {e}")
+            return st.dim(f"fleshed {a[0]} — {r['coauthors']} coauthors, {r['edges']} edges")
         if not a:
             return st.dim("usage: expand <id>")
         try:
@@ -804,7 +892,7 @@ def dispatch(app, line, st=None):
         return render_tree(app, st)
     if c in ("summary", "overview"):
         return render_summary(app, st)
-    if c == "export":
+    if c in ("export", "save"):
         import json
         from pathlib import Path
         d = app.snapshot()
@@ -812,11 +900,11 @@ def dispatch(app, line, st=None):
         Path(path).write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
         n = d["counts"]
         return st.dim(f"exported {n['entities']} entities · {n['cache_nodes']} candidates · {n['cache_edges']} edges → {path}")
-    if c == "import":
+    if c in ("import", "load"):
         import json
         from pathlib import Path
         if not a:
-            return st.dim("usage: import <path>")
+            return st.dim("usage: load <path>")
         p = Path(a[0])
         if not p.exists():
             return st.dim(f"no such file: {a[0]}")

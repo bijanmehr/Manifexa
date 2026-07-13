@@ -63,7 +63,8 @@ def test_map_on_empty_graph_is_friendly(tmp_path):
 
 def test_help_lists_core_commands(tmp_path):
     out = dispatch(_app(tmp_path), "help")
-    for c in ("open", "around", "bridges", "stats", "graph"):
+    # the clean, people-first surface (Eminexa)
+    for c in ("add", "who", "near", "bridges", "groups", "map"):
         assert c in out
 
 
